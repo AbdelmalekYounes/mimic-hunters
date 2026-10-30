@@ -3,9 +3,8 @@
 ## Pourquoi une VM
 
 `test.cmd` fait tourner Studio sur un bureau Windows caché : rien ne s'affiche chez toi, mais
-la vue de rendu y mesure 1×1 pixel. La VM apporte ce qui manque, **sans rien afficher sur ton bureau** :
+personne ne voit le rendu. La VM apporte ce qui manque, **sans rien afficher sur ton bureau** :
 
-- une vraie surface de rendu (1920×1080) : les tests de géométrie de l'interface sont exécutés au lieu d'être ignorés ;
 - des **captures d'écran automatiques** toutes les 2 s pendant les sessions (révélations,
   minijeu, HUD mobile simulé), rangées dans le rapport pour une relecture visuelle ;
 - Studio peut afficher ses fenêtres et prendre le focus **dans la VM** sans te déranger.
@@ -18,9 +17,10 @@ RTX 4080 en direct), ni un vrai téléphone.
 | Élément | État |
 |---|---|
 | Scripts hôte et invité (`test-vm.cmd`, `tools/vm-*.ps1`) | ✅ écrits |
-| Protocole d'échange hôte ↔ agent | ✅ testé sur l'hôte, sans VM (agent en mode `-SkipStudio`) |
-| VMware Workstation, VM Windows 11, Studio dans la VM | ❌ **pas encore installés** (étapes manuelles ci-dessous) |
-| Studio dans une VM VMware (rendu DirectX 11 émulé) | ⚠️ **non vérifié** : à confirmer à l'étape 7 |
+| VM « ROBLOX DEV » (`E:\VMS\ROBLOX DEV`), compte `mimictest`, Studio connecté | ✅ installée par l'utilisateur |
+| Studio dans VMware (GPU « VMware SVGA 3D ») | ✅ **vérifié** : 4 sessions, 44 tests réussis (géométrie du HUD comprise), rendu visible sur les captures (carte, HUD, minijeu, 2 joueurs) |
+| Écran de la VM | ⚠️ 1024×768 au lieu de 1920×1080 : la vue Studio est petite, et le cadre du téléphone simulé est coupé sur les captures |
+| Mise à jour automatique de l'agent (noms versionnés) | ✅ testée sur l'hôte ; ⚠️ dans la VM, l'agent en place date d'avant : relancer l'étape 7 **une fois** |
 
 ## Ton PC (audit en lecture seule)
 
@@ -70,8 +70,11 @@ limites (filigrane, personnalisation).
 - Crée un **compte local dédié**, par exemple `mimictest`, sans données personnelles.
   Si l'installation exige un compte Microsoft : `Maj+F10`, puis `start ms-cxh:localonly`.
   Sur certaines versions, la commande est `OOBE\BYPASSNRO`.
-- Menu *VM › Install VMware Tools*, puis exécute le `setup64.exe` du lecteur monté et redémarre.
-  Les VMware Tools fournissent le pilote 3D et les dossiers partagés.
+- Installe les VMware Tools : ils fournissent le pilote 3D et les dossiers partagés.
+  Le menu *VM › Install VMware Tools* échoue souvent sur les versions Broadcom
+  (« Could not find component on update server »). Dans ce cas, **dans la VM**, ouvre Edge sur
+  https://packages.vmware.com/tools/releases/latest/windows/x64/, télécharge
+  `VMware-tools-<version>-x64.exe`, lance-le (installation *Typical*) puis redémarre.
 - Fixe la résolution de Windows à **1920×1080**.
 
 ### 5. Partager le dossier d'échange
@@ -93,7 +96,11 @@ powershell -ExecutionPolicy Bypass -File "\\vmware-host\Shared Folders\mimic-exc
 ```
 Le script refuse de s'exécuter hors d'une VM VMware. Il installe Git et Rokit, désactive la mise
 en veille **de la VM**, et enregistre l'agent au démarrage de session (tâche planifiée
-`MimicHuntersAgent`).
+`MimicHuntersAgent`). Il remplace et relance un agent déjà démarré.
+Ensuite, l'agent **se met à jour seul** : avant chaque test, `test-vm.cmd` publie la dernière
+version sous un nouveau nom (`setup\agent\vm-agent-<horodatage>-<empreinte>.ps1`), et l'agent
+la copie puis redémarre. Le nom change à chaque version parce que VMware garde verrouillé, côté
+hôte, un fichier que la VM relit régulièrement.
 **Vérification Studio** : ouvre Studio dans la VM, lance une place vide et Play.
 Si le rendu ou les performances posent problème, arrête-toi ici et signale-le-moi.
 
@@ -139,8 +146,11 @@ test-vm.cmd → tools/vm-tests.ps1               tâche planifiée → C:\MimicT
 
 | Symptôme | Action |
 |---|---|
+| « Could not find component on update server » (Install VMware Tools) | Télécharger l'installeur dans la VM depuis packages.vmware.com (étape 4) |
+| « La VM est chiffrée (TPM virtuel) » / vmrun « A password is required » | `vmrun` ne démarre pas une VM chiffrée sans mot de passe, et le script n'en stocke pas. Démarre la VM dans Workstation, ferme Workstation avec *Run in Background*, puis relance `test-vm.cmd` |
+| VM rangée dans un dossier OneDrive | À éviter : OneDrive tente de téléverser des dizaines de Go de disques virtuels pendant qu'ils changent. VM éteinte, déplace son dossier vers un disque non synchronisé (`E:\VMs`), rouvre le `.vmx` et réponds *I Moved It* |
 | « vmrun.exe introuvable » | Installer VMware Workstation (étape 1) |
-| « L'agent ne répond pas » | Session non ouverte automatiquement (étape 8), ou dossier partagé désactivé (étape 5) |
+| « L'agent ne répond pas » | Session non ouverte automatiquement (étape 8), dossier partagé désactivé (étape 5), ou script de l'étape 7 lancé depuis un **autre compte** : la tâche ne démarre que pour l'utilisateur qui l'a enregistrée, donc relance l'étape 7 depuis le compte qui s'ouvre automatiquement |
 | Tâche jamais prise en charge | Dans la VM : `Get-ScheduledTask MimicHuntersAgent`, puis lancer l'agent à la main pour voir l'erreur |
 | Résultat `-1`, `console.txt` vide | Rokit absent du PATH de l'agent : rouvrir la session après l'étape 7 |
 | Sessions Studio en délai dépassé | Ouvrir Studio dans la VM : dialogue de mise à jour ou de connexion expirée |

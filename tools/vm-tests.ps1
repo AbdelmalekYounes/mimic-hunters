@@ -35,7 +35,28 @@ New-Item -ItemType Directory -Force -Path (Join-Path $Exchange "jobs") | Out-Nul
 # Le script d'installation de l'invité est mis à disposition dans le dossier d'échange.
 $setupDir = Join-Path $Exchange "setup"
 New-Item -ItemType Directory -Force -Path $setupDir | Out-Null
-Copy-Item (Join-Path $PSScriptRoot "vm-guest-setup.ps1"), (Join-Path $PSScriptRoot "vm-agent.ps1") $setupDir -Force
+$setupScript = Join-Path $setupDir "vm-guest-setup.ps1"
+if (-not (Test-Path $setupScript) -or (Get-FileHash (Join-Path $PSScriptRoot "vm-guest-setup.ps1")).Hash -ne (Get-FileHash $setupScript).Hash) {
+	Copy-Item (Join-Path $PSScriptRoot "vm-guest-setup.ps1") $setupScript -Force
+}
+# Mise à jour automatique de l'agent. Un fichier que la VM lit régulièrement reste verrouillé
+# côté hôte par VMware : chaque version est donc publiée sous un NOUVEAU nom
+# (setup\agent\vm-agent-<horodatage>-<empreinte>.ps1), jamais réécrite. L'agent ne fait que
+# lister ce dossier et compare l'empreinte du nom le plus récent à la sienne.
+$agentDir = Join-Path $setupDir "agent"
+New-Item -ItemType Directory -Force -Path $agentDir | Out-Null
+$agentHash = (Get-FileHash (Join-Path $PSScriptRoot "vm-agent.ps1")).Hash.Substring(0, 12)
+$newest = Get-ChildItem $agentDir -Filter "vm-agent-*.ps1" | Sort-Object Name | Select-Object -Last 1
+if (-not $newest -or $newest.BaseName -notlike "*-$agentHash") {
+	$published = Join-Path $agentDir ("vm-agent-{0}-{1}.ps1" -f (Get-Date -Format "yyyyMMddHHmmss"), $agentHash)
+	Copy-Item (Join-Path $PSScriptRoot "vm-agent.ps1") $published
+	Write-Host "Nouvelle version de l'agent publiée : $(Split-Path -Leaf $published)"
+	# Anciennes versions : supprimées si possible (une version encore lue par la VM reste verrouillée).
+	Get-ChildItem $agentDir -Filter "vm-agent-*.ps1" | Where-Object { $_.FullName -ne $published } |
+		ForEach-Object { Remove-Item $_.FullName -ErrorAction SilentlyContinue }
+}
+# Ancien emplacement (agents d'avant les noms versionnés) : supprimé dès qu'il n'est plus lu.
+Remove-Item (Join-Path $setupDir "vm-agent.ps1") -ErrorAction SilentlyContinue
 
 function Find-Vmrun {
 	$candidates = @(
@@ -62,6 +83,11 @@ if (-not $NoVmControl) {
 
 	$running = (& $vmrun -T ws list) -join "`n"
 	if ($running -notmatch [regex]::Escape($Vmx)) {
+		# Une VM chiffrée (TPM virtuel de Windows 11) ne démarre pas avec vmrun sans son mot de passe :
+		# on ne le stocke pas, l'utilisateur la démarre dans Workstation (puis « Run in background »).
+		if (Select-String -Path $Vmx -Pattern '^encryption\.keySafe' -Quiet) {
+			throw "La VM est chiffrée (TPM virtuel) : vmrun ne peut pas la démarrer sans mot de passe. Démarre-la dans VMware Workstation (tu peux ensuite fermer Workstation avec « Run in Background »), puis relance test-vm.cmd."
+		}
 		Write-Host "Démarrage de la VM sans fenêtre…"
 		& $vmrun -T ws start $Vmx nogui
 		if ($LASTEXITCODE -ne 0) { throw "vmrun start a échoué (code $LASTEXITCODE)." }
@@ -80,7 +106,7 @@ while ($true) {
 		$age = ((Get-Date) - (Get-Item $heartbeat).LastWriteTime).TotalSeconds
 		if ($age -lt 30) { break }
 	}
-	if ((Get-Date) -gt $deadline) { throw "L'agent ne répond pas (agent-heartbeat.json absent ou ancien). Session ouverte automatiquement dans la VM ?" }
+	if ((Get-Date) -gt $deadline) { throw "L'agent ne répond pas (agent-heartbeat.json absent ou ancien). Dans la VM : session ouverte automatiquement ? Script de préparation lancé depuis CE compte (la tâche MimicHuntersAgent démarre pour l'utilisateur qui l'a enregistrée) ?" }
 	Start-Sleep -Seconds 3
 }
 

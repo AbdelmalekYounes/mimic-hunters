@@ -62,7 +62,12 @@ powercfg /change hibernate-timeout-ac 0
 Step "Agent"
 $agentDir = "C:\MimicTests\agent"
 New-Item -ItemType Directory -Force -Path $agentDir | Out-Null
-Copy-Item (Join-Path $PSScriptRoot "vm-agent.ps1") $agentDir -Force
+# Dernière version publiée par l'hôte (setup\agent\vm-agent-<horodatage>-<empreinte>.ps1),
+# sinon le fichier posé à côté de ce script.
+$latestAgent = Get-ChildItem (Join-Path $PSScriptRoot "agent") -Filter "vm-agent-*.ps1" -ErrorAction SilentlyContinue |
+	Sort-Object Name | Select-Object -Last 1
+$agentSource = if ($latestAgent) { $latestAgent.FullName } else { Join-Path $PSScriptRoot "vm-agent.ps1" }
+Copy-Item $agentSource (Join-Path $agentDir "vm-agent.ps1") -Force
 $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument (
 	"-NoProfile -ExecutionPolicy Bypass -WindowStyle Minimized -File `"$agentDir\vm-agent.ps1`" -Exchange `"$Exchange`"")
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
@@ -70,6 +75,22 @@ $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) 
 Register-ScheduledTask -TaskName "MimicHuntersAgent" -Action $action -Trigger $trigger -Settings $settings `
 	-Description "Agent de tests MIMIC HUNTERS (session interactive, pour que Studio puisse s'afficher)" -Force | Out-Null
 Write-Host "Tâche planifiée « MimicHuntersAgent » enregistrée (démarre à l'ouverture de session de $env:USERNAME)."
+# Remplace un agent déjà lancé (ancienne version) par celui qui vient d'être copié.
+# La tâche est arrêtée d'abord : tant que le Planificateur la croit « en cours », il ignore
+# Start-ScheduledTask (une seule instance à la fois).
+Stop-ScheduledTask -TaskName "MimicHuntersAgent" -ErrorAction SilentlyContinue
+Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" |
+	Where-Object { $_.CommandLine -like "*vm-agent.ps1*" -and $_.ProcessId -ne $PID } |
+	ForEach-Object { Stop-Process -Id $_.ProcessId -Force; Write-Host "Ancien agent arrêté (PID $($_.ProcessId))." }
+$deadline = (Get-Date).AddSeconds(15)
+while ((Get-ScheduledTask -TaskName "MimicHuntersAgent").State -eq "Running" -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
+Start-ScheduledTask -TaskName "MimicHuntersAgent"
+Start-Sleep -Seconds 3
+if ((Get-ScheduledTask -TaskName "MimicHuntersAgent").State -eq "Running") {
+	Write-Host "Agent démarré (fenêtre PowerShell réduite dans la barre des tâches)."
+} else {
+	Write-Warning "L'agent n'a pas démarré : redémarre la VM (il se lance à l'ouverture de session)."
+}
 
 Write-Host "`nÉtapes manuelles restantes dans la VM :"
 Write-Host "  1. Ouverture de session automatique de ce compte (netplwiz ou Sysinternals Autologon)."
