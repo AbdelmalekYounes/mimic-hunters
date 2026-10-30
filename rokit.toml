@@ -1,0 +1,7 @@
+# Outils du projet MIMIC HUNTERS, gérés par Rokit (https://github.com/rojo-rbx/rokit)
+# Installation : `rokit install` à la racine du projet.
+[tools]
+rojo = "rojo-rbx/rojo@7.7.1"
+lune = "lune-org/lune@0.11.1"
+selene = "Kampfkarren/selene@0.27.1"
+stylua = "JohnnyMorganz/StyLua@0.20.0"

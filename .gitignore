@@ -1,0 +1,15 @@
+# Builds Rojo
+*.rbxl
+*.rbxlx
+*.rbxm
+*.rbxmx
+!assets/**/*.rbxm
+sourcemap.json
+roblox.yml
+# Éditeurs / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+# Captures temporaires
+/build/

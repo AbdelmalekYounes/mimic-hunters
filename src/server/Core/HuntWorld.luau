@@ -1,0 +1,919 @@
+--!strict
+--[[
+	HuntWorld — cœur autoritaire de la chasse, sans aucune dépendance Roblox.
+
+	Le serveur Roblox (HuntServer) n'est qu'un adaptateur : il transmet les
+	requêtes brutes des RemoteEvents, la position du personnage et l'heure,
+	puis diffuse les événements retournés. Toute la validation (types,
+	anti-spam, portée, états, délais, récompenses) se fait ici, ce qui permet
+	de la tester entièrement dans Lune, y compris les accès concurrents.
+
+	Chaque méthode publique retourne (events, reply) :
+	- events : liste { name, userId?, payload } ; userId nil = diffusion à tous ;
+	- reply  : la réponse destinée au joueur (déjà incluse dans events).
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local CaptureMinigame = require(Shared.Logic.CaptureMinigame)
+local Validation = require(Shared.Logic.Validation)
+
+local Core = script.Parent
+local MimicStateMachine = require(Core.MimicStateMachine)
+local EncounterGenerator = require(Core.EncounterGenerator)
+local CaptureLedger = require(Core.CaptureLedger)
+local RewardValidator = require(Core.RewardValidator)
+local SessionInventory = require(Core.SessionInventory)
+local RateLimiter = require(Core.RateLimiter)
+local TutorialFlow = require(Core.TutorialFlow)
+
+export type Event = { name: string, userId: number?, payload: any }
+
+export type Profile = {
+	version: number,
+	inventory: any,
+	tutorialDone: boolean,
+}
+
+type Slot = { id: string, kind: string, zone: string, position: any }
+
+type PlayerState = {
+	userId: number,
+	inventory: any,
+	tutorialStep: TutorialFlow.Step,
+	tutorialMimic: MimicStateMachine.Record?,
+	scanReadyAt: number,
+	inspectReadyAt: number,
+}
+
+local PROFILE_VERSION = 1
+local LEDGER_KEEP_SECONDS = 120
+
+local HuntWorld = {}
+HuntWorld.__index = HuntWorld
+
+local function push(events: { Event }, name: string, userId: number?, payload: any)
+	table.insert(events, { name = name, userId = userId, payload = payload })
+end
+
+local function toSlot(spec: any): Slot
+	return { id = spec.id, kind = spec.kind, zone = spec.zone, position = spec.position }
+end
+
+--[[
+	options = {
+		config, catalog, rarities,  -- modules de configuration
+		slots = { PropSpec },       -- emplacements partagés
+		tutorialSlot = PropSpec?,   -- objet du tutoriel (jamais partagé)
+		zones = { string },
+		rng = Rng,
+	}
+]]
+function HuntWorld.new(options: any)
+	local self = setmetatable({}, HuntWorld)
+	self._config = options.config
+	self._catalog = options.catalog
+	self._rarities = options.rarities
+	self._rng = options.rng
+	self._zones = options.zones
+	self._slotList = {} :: { Slot }
+	self._slots = {} :: { [string]: Slot }
+	for _, spec in options.slots do
+		local slot = toSlot(spec)
+		table.insert(self._slotList, slot)
+		self._slots[slot.id] = slot
+	end
+	self._tutorialSlot = if options.tutorialSlot then toSlot(options.tutorialSlot) else nil
+	self._mimics = {} :: { [string]: MimicStateMachine.Record }
+	self._bySlot = {} :: { [string]: string }
+	self._players = {} :: { [number]: PlayerState }
+	self._ledger = CaptureLedger.new()
+	self._limiter = RateLimiter.new(self._config.RateLimits)
+	self._blocked = {} :: { [string]: number }
+	self._respawnAt = {} :: { number }
+	self._counter = 0
+	self._lastPrune = 0
+	return self
+end
+
+-- ─── Utilitaires internes ──────────────────────────────────────────────
+
+function HuntWorld._nextId(self: any, prefix: string): string
+	self._counter += 1
+	return prefix .. tostring(self._counter)
+end
+
+function HuntWorld._lookupSlot(self: any, id: string): Slot?
+	local slot = self._slots[id]
+	if slot then
+		return slot
+	end
+	local tutorial = self._tutorialSlot
+	if tutorial and tutorial.id == id then
+		return tutorial
+	end
+	return nil
+end
+
+function HuntWorld._slotOf(self: any, record: MimicStateMachine.Record): Slot
+	return assert(self:_lookupSlot(record.slotId), "emplacement inconnu " .. record.slotId)
+end
+
+function HuntWorld._blockedSet(self: any, now: number): { [string]: boolean }
+	local set = {}
+	for slotId, untilTime in self._blocked do
+		if untilTime > now then
+			set[slotId] = true
+		else
+			self._blocked[slotId] = nil
+		end
+	end
+	return set
+end
+
+function HuntWorld._activeCount(self: any): number
+	local count = 0
+	for _ in self._mimics do
+		count += 1
+	end
+	return count
+end
+
+function HuntWorld._species(self: any, speciesId: string): any
+	return assert(self._catalog.get(speciesId), "espèce inconnue " .. speciesId)
+end
+
+function HuntWorld._scheduleClue(self: any, record: MimicStateMachine.Record, now: number)
+	if record.personal then
+		local cfg = self._config.Tutorial
+		record.nextClueAt = now + self._rng:nextRange(cfg.ClueIntervalMin, cfg.ClueIntervalMax)
+	else
+		local behavior = self:_species(record.speciesId).behavior
+		record.nextClueAt = now + self._rng:nextRange(behavior.clueIntervalMin, behavior.clueIntervalMax)
+	end
+end
+
+function HuntWorld._pickClue(self: any, record: MimicStateMachine.Record): string
+	local clues = self:_species(record.speciesId).behavior.clues
+	return self._rng:pick(clues) or "Wiggle"
+end
+
+function HuntWorld._publicMimic(_self: any, record: MimicStateMachine.Record, now: number): any
+	local untilTime = record.stateUntil
+	return {
+		mimicId = record.id,
+		propId = record.slotId,
+		speciesId = record.speciesId,
+		state = record.state,
+		ownerUserId = record.ownerId,
+		remaining = if untilTime then math.max(untilTime - now, 0) else nil,
+	}
+end
+
+function HuntWorld._pushMimic(self: any, events: { Event }, record: MimicStateMachine.Record, now: number)
+	push(events, "MimicUpdate", record.audience, self:_publicMimic(record, now))
+end
+
+function HuntWorld._spawnOne(self: any, now: number): boolean
+	local zoneCounts: { [string]: number } = {}
+	for _, record in self._mimics do
+		local zone = self:_slotOf(record).zone
+		zoneCounts[zone] = (zoneCounts[zone] or 0) + 1
+	end
+	local slot, species = EncounterGenerator.chooseSpawn({
+		slots = self._slotList,
+		occupied = self._bySlot,
+		blocked = self:_blockedSet(now),
+		zoneCounts = zoneCounts,
+		zones = self._zones,
+		minPerZone = self._config.Hunt.MinPerZone,
+		species = self._catalog.list(),
+		weightOf = self._rarities.weightOf,
+	}, self._rng)
+	if slot == nil or species == nil then
+		return false
+	end
+	local record = MimicStateMachine.new(self:_nextId("M"), species.id, slot.id, now, nil)
+	-- Premier indice rapide pour que le monde paraisse vivant dès l'arrivée.
+	record.nextClueAt = now + self._rng:nextRange(1, species.behavior.clueIntervalMin)
+	self._mimics[record.id] = record
+	self._bySlot[slot.id] = record.id
+	return true
+end
+
+function HuntWorld._fill(self: any, now: number, maxCount: number?): number
+	local target = self._config.Hunt.ActiveMimics
+	local spawned = 0
+	while self:_activeCount() < target and (maxCount == nil or spawned < maxCount) do
+		if not self:_spawnOne(now) then
+			break
+		end
+		spawned += 1
+	end
+	return spawned
+end
+
+function HuntWorld._tutorialEvent(self: any, player: PlayerState, event: string, events: { Event }, _now: number)
+	local before = player.tutorialStep
+	local after = TutorialFlow.advance(before, event)
+	if after == before then
+		return
+	end
+	player.tutorialStep = after
+	if after == "Done" then
+		local record = player.tutorialMimic
+		if record and record.state ~= "Disguised" and record.state ~= "Captured" then
+			push(events, "MimicUpdate", player.userId, {
+				mimicId = record.id,
+				propId = record.slotId,
+				state = "Hidden",
+			})
+		end
+		player.tutorialMimic = nil
+	end
+	local tutorial = self._tutorialSlot
+	push(events, "TutorialUpdate", player.userId, {
+		step = after,
+		propId = if tutorial then tutorial.id else nil,
+	})
+end
+
+function HuntWorld._newTutorialMimic(self: any, userId: number, now: number): MimicStateMachine.Record?
+	local slot = self._tutorialSlot
+	if slot == nil then
+		return nil
+	end
+	local record = MimicStateMachine.new(self:_nextId("T"), self._config.Tutorial.SpeciesId, slot.id, now, userId)
+	record.nextClueAt = now + 2
+	return record
+end
+
+function HuntWorld._findRecord(self: any, player: PlayerState, mimicId: string): MimicStateMachine.Record?
+	local personal = player.tutorialMimic
+	if personal and personal.id == mimicId then
+		return personal
+	end
+	return self._mimics[mimicId]
+end
+
+function HuntWorld._recordForAttempt(self: any, attempt: CaptureMinigame.Attempt): MimicStateMachine.Record?
+	if attempt.personal then
+		local player = self._players[attempt.userId]
+		local record = player and player.tutorialMimic
+		if record and record.id == attempt.mimicId then
+			return record
+		end
+		return nil
+	end
+	return self._mimics[attempt.mimicId]
+end
+
+-- Un joueur ne garde qu'une révélation à la fois : les autres s'enfuient.
+function HuntWorld._releaseOtherClaims(
+	self: any,
+	player: PlayerState,
+	keep: MimicStateMachine.Record,
+	now: number,
+	events: { Event }
+)
+	local flee = self._config.Hunt.FleeDuration
+	local function check(record: MimicStateMachine.Record)
+		if record ~= keep and record.state == "Revealed" and record.ownerId == player.userId then
+			MimicStateMachine.release(record, now, flee)
+			self:_pushMimic(events, record, now)
+		end
+	end
+	for _, record in self._mimics do
+		check(record)
+	end
+	if player.tutorialMimic then
+		check(player.tutorialMimic)
+	end
+end
+
+-- ─── Résolution des captures ───────────────────────────────────────────
+
+function HuntWorld._resolveFailure(
+	self: any,
+	attempt: CaptureMinigame.Attempt,
+	now: number,
+	events: { Event },
+	reason: string
+)
+	if attempt.status == "Active" then
+		attempt.status = "Failed"
+	end
+	self._ledger:close(attempt.id, now)
+	local record = self:_recordForAttempt(attempt)
+	if record and record.state == "Capturing" and record.attemptId == attempt.id then
+		MimicStateMachine.failCapture(record, attempt.userId, attempt.id, now, self._config.Hunt.FleeDuration)
+		self:_pushMimic(events, record, now)
+	end
+	push(events, "CaptureResolved", attempt.userId, {
+		success = false,
+		attemptId = attempt.id,
+		mimicId = attempt.mimicId,
+		speciesId = attempt.speciesId,
+		reason = reason,
+	})
+	local player = self._players[attempt.userId]
+	if player then
+		self:_tutorialEvent(player, "Escaped", events, now)
+	end
+end
+
+function HuntWorld._resolveSuccess(self: any, attempt: CaptureMinigame.Attempt, now: number, events: { Event })
+	local record = self:_recordForAttempt(attempt)
+	local completed = false
+	if record then
+		completed = MimicStateMachine.completeCapture(record, attempt.userId, attempt.id, now)
+	end
+	if not completed or record == nil then
+		attempt.status = "Failed"
+		self:_resolveFailure(attempt, now, events, "Invalid")
+		return
+	end
+
+	local player = self._players[attempt.userId]
+	local valid = RewardValidator.validate(attempt, record, self._ledger)
+	self._ledger:close(attempt.id, now)
+
+	if valid and player and self._ledger:markRewarded(attempt.id) then
+		local added, info = player.inventory:add(record.speciesId, attempt.id)
+		if added then
+			push(events, "CaptureResolved", attempt.userId, {
+				success = true,
+				attemptId = attempt.id,
+				mimicId = record.id,
+				speciesId = record.speciesId,
+				isNew = info.isNew,
+				count = info.count,
+				totalCaptures = info.totalCaptures,
+				discovered = info.discovered,
+			})
+			push(events, "InventoryUpdate", attempt.userId, { snapshot = player.inventory:snapshot() })
+		end
+	end
+
+	self:_pushMimic(events, record, now)
+
+	if record.personal then
+		if player and player.tutorialMimic == record then
+			player.tutorialMimic = nil
+		end
+	else
+		self._mimics[record.id] = nil
+		self._bySlot[record.slotId] = nil
+		self._blocked[record.slotId] = now + self._config.Hunt.SlotReuseDelay
+		table.insert(self._respawnAt, now + self._config.Hunt.RespawnDelay)
+	end
+
+	if player then
+		self:_tutorialEvent(player, "Captured", events, now)
+	end
+end
+
+-- ─── Cycle de vie des joueurs ──────────────────────────────────────────
+
+function HuntWorld.populate(self: any, now: number): { Event }
+	self:_fill(now, nil)
+	return {}
+end
+
+function HuntWorld.addPlayer(self: any, userId: number, now: number, profile: Profile?)
+	if self._players[userId] then
+		return
+	end
+	local done = profile ~= nil and profile.tutorialDone == true
+	local player: PlayerState = {
+		userId = userId,
+		inventory = SessionInventory.fromSnapshot(userId, if profile then profile.inventory else nil),
+		tutorialStep = TutorialFlow.initial(done),
+		tutorialMimic = nil,
+		scanReadyAt = -math.huge,
+		inspectReadyAt = -math.huge,
+	}
+	if not done then
+		player.tutorialMimic = self:_newTutorialMimic(userId, now)
+	end
+	self._players[userId] = player
+end
+
+function HuntWorld.clientReady(self: any, userId: number, now: number): ({ Event }, any)
+	local events = {}
+	local player = self._players[userId]
+	if player == nil or not self._limiter:allow(userId, "Ready", now) then
+		return events, nil
+	end
+	local list = {}
+	for _, record in self._mimics do
+		if record.state ~= "Disguised" then
+			table.insert(list, self:_publicMimic(record, now))
+		end
+	end
+	local personal = player.tutorialMimic
+	if personal and personal.state ~= "Disguised" then
+		table.insert(list, self:_publicMimic(personal, now))
+	end
+	push(events, "WorldSnapshot", userId, { mimics = list })
+	push(events, "InventoryUpdate", userId, { snapshot = player.inventory:snapshot() })
+	local tutorial = self._tutorialSlot
+	push(events, "TutorialUpdate", userId, {
+		step = player.tutorialStep,
+		propId = if tutorial then tutorial.id else nil,
+	})
+	return events, true
+end
+
+function HuntWorld.removePlayer(self: any, userId: number, now: number): { Event }
+	local events = {}
+	local player = self._players[userId]
+	if player == nil then
+		return events
+	end
+	local attempt = self._ledger:activeFor(userId)
+	if attempt then
+		self:_resolveFailure(attempt, now, events, "Left")
+	end
+	local flee = self._config.Hunt.FleeDuration
+	for _, record in self._mimics do
+		if record.ownerId == userId and (record.state == "Revealed" or record.state == "Capturing") then
+			MimicStateMachine.release(record, now, flee)
+			self:_pushMimic(events, record, now)
+		end
+	end
+	self._players[userId] = nil
+	self._limiter:forget(userId)
+	-- Les messages destinés au joueur parti sont inutiles.
+	local kept = {}
+	for _, event in events do
+		if event.userId ~= userId then
+			table.insert(kept, event)
+		end
+	end
+	return kept
+end
+
+function HuntWorld.getProfile(self: any, userId: number): Profile?
+	local player = self._players[userId]
+	if player == nil then
+		return nil
+	end
+	return {
+		version = PROFILE_VERSION,
+		inventory = player.inventory:snapshot(),
+		tutorialDone = player.tutorialStep == "Done",
+	}
+end
+
+-- ─── Requêtes des joueurs ──────────────────────────────────────────────
+
+function HuntWorld.scan(self: any, userId: number, position: any, now: number): ({ Event }, any)
+	local events = {}
+	local function reply(payload: any)
+		push(events, "ScanResult", userId, payload)
+		return events, payload
+	end
+	local player = self._players[userId]
+	if player == nil then
+		return reply({ ok = false, reason = "UnknownPlayer" })
+	end
+	if not self._limiter:allow(userId, "Scan", now) then
+		return reply({ ok = false, reason = "RateLimited" })
+	end
+	if not Validation.isPosition(position) then
+		return reply({ ok = false, reason = "NoCharacter" })
+	end
+	if now < player.scanReadyAt then
+		return reply({ ok = false, reason = "Cooldown", remaining = player.scanReadyAt - now })
+	end
+
+	local cfg = self._config.Scanner
+	player.scanReadyAt = now + cfg.Cooldown
+	local nearest = math.huge
+
+	local function consider(record: MimicStateMachine.Record)
+		if record.state ~= "Disguised" then
+			return
+		end
+		local slot = self:_slotOf(record)
+		local distance = Validation.horizontalDistance(position, slot.position)
+		if distance > cfg.SignalRange then
+			return
+		end
+		nearest = math.min(nearest, distance)
+		if distance <= cfg.FlinchRange then
+			push(events, "Clue", userId, { propId = slot.id, clue = self:_pickClue(record), strong = true })
+		end
+	end
+	for _, record in self._mimics do
+		consider(record)
+	end
+	if player.tutorialMimic then
+		consider(player.tutorialMimic)
+	end
+
+	local band = "None"
+	if nearest <= cfg.StrongBand then
+		band = "Strong"
+	elseif nearest <= cfg.MediumBand then
+		band = "Medium"
+	elseif nearest <= cfg.SignalRange then
+		band = "Weak"
+	end
+	local _, payload = reply({ ok = true, band = band, cooldown = cfg.Cooldown })
+	self:_tutorialEvent(player, "Scanned", events, now)
+	return events, payload
+end
+
+function HuntWorld.inspect(self: any, userId: number, position: any, propId: any, now: number): ({ Event }, any)
+	local events = {}
+	local function reply(payload: any)
+		push(events, "InspectResult", userId, payload)
+		return events, payload
+	end
+	local player = self._players[userId]
+	if player == nil then
+		return reply({ ok = false, reason = "UnknownPlayer" })
+	end
+	if not self._limiter:allow(userId, "Inspect", now) then
+		return reply({ ok = false, reason = "RateLimited" })
+	end
+	if not Validation.isId(propId, 16) then
+		return reply({ ok = false, reason = "BadInput" })
+	end
+	local slot = self:_lookupSlot(propId)
+	if slot == nil then
+		return reply({ ok = false, reason = "UnknownProp" })
+	end
+	if not Validation.isPosition(position) then
+		return reply({ ok = false, reason = "NoCharacter" })
+	end
+	if now < player.inspectReadyAt then
+		return reply({ ok = false, reason = "Cooldown", remaining = player.inspectReadyAt - now })
+	end
+	local cfg = self._config.Inspect
+	if not Validation.withinReach(position, slot.position, cfg.Range, cfg.VerticalTolerance) then
+		return reply({ ok = false, reason = "OutOfRange" })
+	end
+	if self._ledger:activeFor(userId) then
+		return reply({ ok = false, reason = "Capturing" })
+	end
+	player.inspectReadyAt = now + cfg.Cooldown
+
+	local record: MimicStateMachine.Record?
+	local tutorial = self._tutorialSlot
+	if tutorial and slot.id == tutorial.id then
+		record = player.tutorialMimic
+	else
+		local mimicId = self._bySlot[slot.id]
+		record = if mimicId then self._mimics[mimicId] else nil
+	end
+
+	if record == nil then
+		player.inspectReadyAt = now + cfg.MissCooldown
+		return reply({ ok = true, result = "Ordinary", propId = slot.id, kind = slot.kind })
+	end
+
+	if record.state == "Disguised" then
+		self:_releaseOtherClaims(player, record, now, events)
+		local claim = if record.personal
+			then self._config.Tutorial.ClaimDuration
+			else self._config.Hunt.RevealClaimDuration
+		MimicStateMachine.reveal(record, userId, now, claim)
+		self:_pushMimic(events, record, now)
+		local _, payload = reply({
+			ok = true,
+			result = "Mimic",
+			propId = slot.id,
+			mimicId = record.id,
+			speciesId = record.speciesId,
+			claim = claim,
+		})
+		self:_tutorialEvent(player, "Revealed", events, now)
+		return events, payload
+	elseif (record.state == "Revealed" or record.state == "Capturing") and record.ownerId == userId then
+		return reply({
+			ok = true,
+			result = "Mimic",
+			propId = slot.id,
+			mimicId = record.id,
+			speciesId = record.speciesId,
+			already = true,
+		})
+	elseif record.state == "Revealed" or record.state == "Capturing" then
+		return reply({ ok = true, result = "Busy", propId = slot.id, ownerUserId = record.ownerId })
+	end
+	return reply({ ok = true, result = "Fled", propId = slot.id })
+end
+
+function HuntWorld.startCapture(self: any, userId: number, position: any, mimicId: any, now: number): ({ Event }, any)
+	local events = {}
+	local function reply(payload: any)
+		push(events, "CaptureStarted", userId, payload)
+		return events, payload
+	end
+	local player = self._players[userId]
+	if player == nil then
+		return reply({ ok = false, reason = "UnknownPlayer" })
+	end
+	if not self._limiter:allow(userId, "Capture", now) then
+		return reply({ ok = false, reason = "RateLimited" })
+	end
+	if not Validation.isId(mimicId, 32) then
+		return reply({ ok = false, reason = "BadInput" })
+	end
+	local record = self:_findRecord(player, mimicId)
+	if record == nil then
+		return reply({ ok = false, reason = "UnknownMimic" })
+	end
+	if self._ledger:activeFor(userId) then
+		return reply({ ok = false, reason = "AlreadyCapturing" })
+	end
+	local slot = self:_slotOf(record)
+	if not Validation.isPosition(position) then
+		return reply({ ok = false, reason = "NoCharacter" })
+	end
+	local capture = self._config.Capture
+	if not Validation.withinReach(position, slot.position, capture.Range, self._config.Inspect.VerticalTolerance) then
+		return reply({ ok = false, reason = "OutOfRange" })
+	end
+
+	local attemptId = self:_nextId("A")
+	local timeout = if record.personal then self._config.Tutorial.AttemptTimeout else capture.AttemptTimeout
+	local ok, err = MimicStateMachine.startCapture(record, userId, attemptId, now, timeout)
+	if not ok then
+		return reply({ ok = false, reason = err })
+	end
+
+	local difficulty = if record.personal
+		then self._config.Tutorial.Difficulty
+		else self:_species(record.speciesId).behavior.capture
+	local attempt = CaptureMinigame.newAttempt({
+		id = attemptId,
+		userId = userId,
+		mimicId = record.id,
+		speciesId = record.speciesId,
+		slotId = slot.id,
+		personal = record.personal,
+		difficulty = difficulty,
+		now = now,
+		timeout = timeout,
+		hitsRequired = capture.HitsRequired,
+		maxMisses = if record.personal then nil else capture.MaxMisses,
+		rng = self._rng,
+	})
+	local opened = self._ledger:open(attempt)
+	assert(opened, "tentative déjà ouverte")
+
+	local _, payload = reply({
+		ok = true,
+		attemptId = attemptId,
+		mimicId = record.id,
+		speciesId = record.speciesId,
+		propId = slot.id,
+		stage = CaptureMinigame.publicStage(attempt.stage),
+		hitsRequired = attempt.hitsRequired,
+		maxMisses = attempt.maxMisses or -1,
+		timeout = timeout,
+		minStageElapsed = capture.MinStageElapsed,
+	})
+	self:_pushMimic(events, record, now)
+	return events, payload
+end
+
+function HuntWorld.pulse(
+	self: any,
+	userId: number,
+	position: any,
+	attemptId: any,
+	claimedElapsed: any,
+	allowance: number,
+	now: number
+): ({ Event }, any)
+	local events = {}
+	local function reply(payload: any)
+		push(events, "PulseResult", userId, payload)
+		return events, payload
+	end
+	local player = self._players[userId]
+	if player == nil then
+		return reply({ ok = false, reason = "UnknownPlayer" })
+	end
+	if not self._limiter:allow(userId, "Pulse", now) then
+		return reply({ ok = false, reason = "RateLimited" })
+	end
+	if not Validation.isId(attemptId, 32) then
+		return reply({ ok = false, reason = "BadInput" })
+	end
+	local attempt = self._ledger:get(attemptId)
+	if attempt == nil then
+		return reply({ ok = false, reason = "UnknownAttempt" })
+	end
+	if attempt.userId ~= userId then
+		return reply({ ok = false, reason = "NotYours" })
+	end
+	if attempt.status ~= "Active" then
+		return reply({ ok = false, reason = "Resolved", attemptId = attempt.id })
+	end
+	local record = self:_recordForAttempt(attempt)
+	if record == nil then
+		self:_resolveFailure(attempt, now, events, "Invalid")
+		return reply({ ok = false, reason = "Resolved", attemptId = attempt.id })
+	end
+	local capture = self._config.Capture
+	local slot = self:_slotOf(record)
+	if
+		not Validation.withinReach(position, slot.position, capture.PulseRange, self._config.Inspect.VerticalTolerance)
+	then
+		return reply({ ok = false, reason = "OutOfRange", attemptId = attempt.id })
+	end
+
+	local window = math.clamp(
+		if Validation.isFiniteNumber(allowance) then allowance else 0,
+		capture.LatencyMin,
+		capture.LatencyMax
+	)
+	local result = CaptureMinigame.evaluatePulse(attempt, claimedElapsed, now, window, capture, self._rng)
+	local _, payload = reply({
+		ok = result.accepted,
+		reason = result.reason,
+		attemptId = attempt.id,
+		hit = result.hit,
+		position = result.position,
+		hits = result.hits,
+		misses = result.misses,
+		status = result.status,
+		stage = if result.stage then CaptureMinigame.publicStage(result.stage) else nil,
+	})
+
+	if attempt.status == "Succeeded" then
+		self:_resolveSuccess(attempt, now, events)
+	elseif attempt.status == "Failed" then
+		self:_resolveFailure(attempt, now, events, "Escaped")
+	elseif attempt.status == "Expired" then
+		self:_resolveFailure(attempt, now, events, "Timeout")
+	end
+	return events, payload
+end
+
+-- ─── Horloge ───────────────────────────────────────────────────────────
+
+function HuntWorld._tickRecord(self: any, record: MimicStateMachine.Record, now: number, events: { Event })
+	local flee = self._config.Hunt.FleeDuration
+	local event = MimicStateMachine.tick(record, now, flee)
+	if event == "ClaimExpired" then
+		self:_pushMimic(events, record, now)
+		if record.audience then
+			local player = self._players[record.audience]
+			if player then
+				self:_tutorialEvent(player, "Escaped", events, now)
+			end
+		end
+	elseif event == "CaptureTimeout" then
+		local attemptId = record.attemptId
+		local attempt = if attemptId then self._ledger:get(attemptId) else nil
+		if attempt and attempt.status == "Active" then
+			attempt.status = "Expired"
+			self:_resolveFailure(attempt, now, events, "Timeout")
+		else
+			MimicStateMachine.release(record, now, flee)
+			self:_pushMimic(events, record, now)
+		end
+	elseif event == "FleeFinished" then
+		local from = self:_slotOf(record)
+		local target = from
+		if not record.personal then
+			self._bySlot[from.id] = nil
+			local chosen =
+				EncounterGenerator.chooseFleeSlot(self._slotList, self._bySlot, self:_blockedSet(now), from, self._rng)
+			target = chosen or from
+			self._bySlot[target.id] = record.id
+		end
+		MimicStateMachine.settle(record, target.id, now)
+		self:_scheduleClue(record, now)
+		push(events, "MimicUpdate", record.audience, { mimicId = record.id, propId = from.id, state = "Hidden" })
+	end
+end
+
+function HuntWorld._tickClues(self: any, now: number, positions: { [number]: any }, events: { Event })
+	local range = self._config.Clues.BroadcastRange
+	for _, record in self._mimics do
+		if record.state == "Disguised" and now >= record.nextClueAt then
+			self:_scheduleClue(record, now)
+			local slot = self:_slotOf(record)
+			local clue = self:_pickClue(record)
+			for userId, position in positions do
+				if
+					self._players[userId]
+					and Validation.isPosition(position)
+					and Validation.horizontalDistance(position, slot.position) <= range
+				then
+					push(events, "Clue", userId, { propId = slot.id, clue = clue, strong = false })
+				end
+			end
+		end
+	end
+	for userId, player in self._players do
+		local record = player.tutorialMimic
+		if record and record.state == "Disguised" and now >= record.nextClueAt then
+			self:_scheduleClue(record, now)
+			local position = positions[userId]
+			local slot = self:_slotOf(record)
+			if Validation.isPosition(position) and Validation.horizontalDistance(position, slot.position) <= range then
+				push(events, "Clue", userId, {
+					propId = slot.id,
+					clue = self:_pickClue(record),
+					strong = player.tutorialStep == "Inspect",
+				})
+			end
+		end
+	end
+end
+
+function HuntWorld.tick(self: any, now: number, positions: { [number]: any }): { Event }
+	local events = {}
+
+	for _, attempt in self._ledger:activeAttempts() do
+		if CaptureMinigame.checkExpiry(attempt, now) then
+			self:_resolveFailure(attempt, now, events, "Timeout")
+		end
+	end
+
+	local records = {}
+	for _, record in self._mimics do
+		table.insert(records, record)
+	end
+	for _, player in self._players do
+		if player.tutorialMimic then
+			table.insert(records, player.tutorialMimic)
+		end
+	end
+	for _, record in records do
+		self:_tickRecord(record, now, events)
+	end
+
+	local due = 0
+	local pending = {}
+	for _, at in self._respawnAt do
+		if at <= now then
+			due += 1
+		else
+			table.insert(pending, at)
+		end
+	end
+	self._respawnAt = pending
+	if due > 0 then
+		self:_fill(now, due)
+	elseif #pending == 0 then
+		-- Rattrapage si un remplissage précédent a échoué (emplacements bloqués).
+		self:_fill(now, 1)
+	end
+
+	self:_tickClues(now, positions, events)
+
+	if now - self._lastPrune > 30 then
+		self._lastPrune = now
+		self._ledger:prune(now, LEDGER_KEEP_SECONDS)
+	end
+	return events
+end
+
+-- ─── Lecture (tests, débogage) ─────────────────────────────────────────
+
+function HuntWorld.mimicAtSlot(self: any, slotId: string): MimicStateMachine.Record?
+	local id = self._bySlot[slotId]
+	return if id then self._mimics[id] else nil
+end
+
+function HuntWorld.sharedMimics(self: any): { MimicStateMachine.Record }
+	local out = {}
+	for _, record in self._mimics do
+		table.insert(out, record)
+	end
+	table.sort(out, function(a, b)
+		return a.id < b.id
+	end)
+	return out
+end
+
+function HuntWorld.inventoryOf(self: any, userId: number): any
+	local player = self._players[userId]
+	return if player then player.inventory else nil
+end
+
+function HuntWorld.tutorialStepOf(self: any, userId: number): string?
+	local player = self._players[userId]
+	return if player then player.tutorialStep else nil
+end
+
+function HuntWorld.tutorialMimicOf(self: any, userId: number): MimicStateMachine.Record?
+	local player = self._players[userId]
+	return if player then player.tutorialMimic else nil
+end
+
+function HuntWorld.slot(self: any, slotId: string): Slot?
+	return self:_lookupSlot(slotId)
+end
+
+return HuntWorld

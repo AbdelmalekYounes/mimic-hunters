@@ -1,0 +1,5 @@
+std = "roblox"
+
+[lints]
+# Les specs Lune utilisent des globales de test injectées.
+unused_variable = "warn"
