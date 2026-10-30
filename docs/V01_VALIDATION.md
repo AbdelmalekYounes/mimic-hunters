@@ -9,6 +9,23 @@ Ce rapport distingue trois niveaux, sans les mélanger :
 - **Testé automatiquement** : couvert par les tests Lune (exécutés, résultats ci-dessous).
 - **Vérifié dans Studio** : observé de mes yeux pendant une partie dans Studio (Play solo).
 
+## 0. Mise à jour du 30/10/2026 (soir) : tests Studio automatisés
+
+`test.cmd` exécute maintenant 4 sessions Studio sur un bureau Windows caché : 42 tests réussis,
+2 ignorés, 0 échec, ≈ 75 s (voir [TESTING.md](TESTING.md)). Points qui étaient « non testés »
+ci-dessous et qui sont désormais **testés automatiquement** :
+
+| Point | Couverture automatique | Reste à vérifier à l'œil |
+|---|---|---|
+| 2 joueurs simultanés | 2 clients, déconnexion `LeaveTest`, reconnexion `AddPlayers`, autre joueur non affecté | interaction visuelle entre joueurs |
+| Interface tactile | simulation `iphone_13` : `TouchEnabled`, disposition tactile, textes | géométrie, confort, téléphone réel |
+| Carte « Nouvelle espèce » | affichée après une capture réelle (état de l'interface) | rendu visuel |
+| Message final du tutoriel | étape `Done` confirmée côté serveur après la capture | rendu visuel du bandeau |
+| Zone Commerciale | générée et non vide, objets posés au sol | aspect visuel |
+| Objets posés au sol (régression du bug de pivot) | les 41 objets, y compris les 6 modèles d'espèce | — |
+
+Toujours **non couverts** : rendu, animations, sons audibles, performance, géométrie à la taille d'écran réelle.
+
 ## 1. Résultats des outils (exécutés)
 
 | Commande | Résultat |

@@ -1,1 +1,3 @@
 std = "luau"
+# Les suites Studio utilisent l API Roblox : elles sont lintées avec la config racine.
+exclude = ["studio/*"]

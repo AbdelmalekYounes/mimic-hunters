@@ -8,14 +8,14 @@
 | 1 — Carte et Mimics | 3 zones générées par script, 40 objets + tutoriel, 6 espèces, animations | ✅ fait |
 | 2 — Gameplay | Scanner, indices, examen, minijeu, validation serveur | ✅ fait |
 | 3 — Récompenses et interface | Inventaire de session, découverte, raretés, HUD PC/mobile, Codex | ✅ fait |
-| 4 — Validation | 123 tests automatisés, partie solo dans Studio, captures | 🟡 partiel (voir V01_VALIDATION.md) |
+| 4 — Validation | 123 tests Lune + 42 tests Studio automatisés (`test.cmd`), partie solo, captures | 🟡 partiel : vérifications visuelles restantes (voir TESTING.md) |
 
 ### À terminer avant de clore la V0.1
 
-1. Test **2 joueurs** dans Studio (*Clients et serveurs*) : course à la révélation, capture
-   en parallèle, départ en pleine capture.
-2. Test **mobile** avec l'émulateur d'appareils de Studio : taille et position des boutons,
-   toucher d'un objet, bouton IMPULSION.
+1. ~~Test **2 joueurs** dans Studio~~ : automatisé (`test.cmd`, session multiplayer). Reste la
+   course à la révélation entre deux vrais clients (couverte côté serveur avec de faux joueurs).
+2. ~~Test **mobile**~~ : disposition tactile automatisée (simulation d'appareil). Restent la
+   géométrie à l'écran et le confort tactile, à vérifier visuellement.
 3. Vérification visuelle des 6 révélations, des 3 styles de fuite et de la carte de découverte.
 4. Passage **luau-lsp analyze** (types `--!strict`) et correction des avertissements.
 5. Mesure de performance (MicroProfiler) avec plusieurs joueurs.

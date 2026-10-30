@@ -48,6 +48,16 @@ Dans ce cas, mettez-le à jour avec `rojo plugin install`.
 
 ## Tests et qualité
 
+**Commande unique** (Windows), sans prendre la main sur le bureau. Studio tourne sur un bureau
+Windows caché ; détails et limites dans [docs/TESTING.md](docs/TESTING.md) :
+
+```bat
+test.cmd               :: ligne de commande + 4 sessions Roblox Studio (≈ 75 s)
+test.cmd -SkipStudio   :: ligne de commande seulement (≈ 2 s)
+```
+
+Rapport : `build/test-reports/latest.md`. Commandes individuelles :
+
 ```bash
 lune run tests/run          # 123 tests unitaires et d'intégration (logique pure)
 lune run tests/run capture  # seulement les fichiers dont le nom contient « capture »
@@ -105,6 +115,7 @@ docs/                  GAME_DESIGN, ARCHITECTURE, ROADMAP, V01_VALIDATION, scree
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — choix techniques, flux réseau, sécurité
 - [docs/ROADMAP.md](docs/ROADMAP.md) — jalons et suite
 - [docs/V01_VALIDATION.md](docs/V01_VALIDATION.md) — ce qui est implémenté, testé, et les limites
+- [docs/TESTING.md](docs/TESTING.md) — tests automatisés Studio sans monopoliser le PC
 
 ## Outils de débogage (Studio uniquement)
 
