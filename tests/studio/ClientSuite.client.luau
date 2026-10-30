@@ -118,36 +118,77 @@ local function runTests(payload: any)
 		env.touchLayout = touch
 		local action = hud:FindFirstChild("Action") :: TextButton
 		local pulse = hud.Capture:FindFirstChild("Pulse") :: TextButton
-		local offset = action.Position.Y.Offset
-		env.actionOffsetY = offset
+		local layout = hud:GetAttribute("Layout")
+		env.layout = layout
 		env.pulseText = pulse.Text
 		env.keyHintVisible = (action:FindFirstChild("KeyHint") :: TextLabel).Visible
 		if touch then
-			expect(offset == -190, "bouton d'action non relevé au-dessus du saut : " .. offset)
+			expect(
+				layout == "touch" or layout == "touchCompact",
+				"disposition tactile attendue, obtenu " .. tostring(layout)
+			)
 			expect(pulse.Text == "IMPULSION !", "texte tactile attendu, obtenu " .. pulse.Text)
 			expect(not env.keyHintVisible, "indices de touches clavier visibles en tactile")
 		else
-			expect(offset == -24, "position PC attendue, obtenu " .. offset)
+			expect(layout == "pc", "disposition PC attendue, obtenu " .. tostring(layout))
 			expect(env.keyHintVisible, "indices de touches clavier masqués sur PC")
 		end
 	end)
 
 	check("hud.tient_dans_l_ecran", function()
 		expect(hud ~= nil, "HUD absent")
+		-- Au lancement du client, la caméra vaut encore 1×1 le temps que Studio dimensionne la vue
+		-- (constaté dans la VM : vue mesurée 1×1 alors qu'elle s'affichait normalement).
+		local function viewSize(): Vector2
+			return if workspace.CurrentCamera then workspace.CurrentCamera.ViewportSize else Vector2.zero
+		end
+		local deadline = os.clock() + 5
+		while (viewSize().X < 320 or viewSize().Y < 240) and os.clock() < deadline do
+			task.wait(0.1)
+		end
+		task.wait(0.2) -- laisse l'interface se recalculer à la nouvelle taille
+		local view = viewSize()
 		local screen = hud.AbsoluteSize
 		env.screen = { screen.X, screen.Y }
-		local view = if workspace.CurrentCamera then workspace.CurrentCamera.ViewportSize else Vector2.zero
+		env.viewport = { view.X, view.Y }
 		if view.X < 320 or view.Y < 240 then
-			-- Sur un bureau Windows caché, la vue 3D n'est pas dimensionnée (1×1) et la
-			-- taille de l'interface ne correspond pas à l'appareil simulé : la géométrie
-			-- n'est pas mesurable ici, seule une session visible le permet.
-			skip(string.format("vue de rendu %dx%d : géométrie non mesurable sans session visible", view.X, view.Y))
+			-- Vue jamais dimensionnée après 5 s : la géométrie n'est pas mesurable dans cette session.
+			skip(string.format("vue de rendu %dx%d après 5 s : géométrie non mesurable", view.X, view.Y))
 		end
-		for _, name in { "Action", "Scan", "Codex", "Counter" } do
+		-- La disposition suit la taille finale : sur téléphone (petit côté ≤ 500 px), la compacte.
+		env.layout = hud:GetAttribute("Layout")
+		if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
+			local expected = if math.min(screen.X, screen.Y) <= 500 then "touchCompact" else "touch"
+			expect(env.layout == expected, "disposition " .. expected .. " attendue, obtenu " .. tostring(env.layout))
+		end
+		-- Positions réellement appliquées par Roblox (y compris les éléments masqués pour l'instant).
+		local names = { "Counter", "Banner", "Action", "Scan", "Codex", "Signal", "Capture" }
+		local rects = {}
+		env.rects = {}
+		for _, name in names do
 			local gui = hud:FindFirstChild(name) :: GuiObject
 			local pos, size = gui.AbsolutePosition, gui.AbsoluteSize
-			expect(pos.X >= 0 and pos.Y >= 0, name .. " déborde en haut/gauche")
-			expect(pos.X + size.X <= screen.X + 1 and pos.Y + size.Y <= screen.Y + 1, name .. " déborde de l'écran")
+			rects[name] = { x = pos.X, y = pos.Y, w = size.X, h = size.Y }
+			env.rects[name] = string.format("%d,%d %dx%d", pos.X, pos.Y, size.X, size.Y)
+			expect(pos.X >= 0 and pos.Y >= 0, name .. " déborde en haut/gauche (" .. env.rects[name] .. ")")
+			expect(
+				pos.X + size.X <= screen.X + 1 and pos.Y + size.Y <= screen.Y + 1,
+				name .. " déborde de l'écran (" .. env.rects[name] .. ")"
+			)
+		end
+		local function overlaps(a, b)
+			-- 1 px de tolérance pour les arrondis.
+			return a.x + 1 < b.x + b.w and b.x + 1 < a.x + a.w and a.y + 1 < b.y + b.h and b.y + 1 < a.y + a.h
+		end
+		local persistent = { "Counter", "Banner", "Action", "Scan", "Codex", "Signal" }
+		for i, a in persistent do
+			for j = i + 1, #persistent do
+				local b = persistent[j]
+				expect(not overlaps(rects[a], rects[b]), a .. " chevauche " .. b)
+			end
+		end
+		for _, name in { "Counter", "Banner", "Action", "Scan", "Codex" } do
+			expect(not overlaps(rects.Capture, rects[name]), "le minijeu chevauche " .. name)
 		end
 	end)
 

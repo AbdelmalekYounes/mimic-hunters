@@ -34,7 +34,7 @@ en millisecondes, avec une horloge et une graine aléatoire contrôlées.
 | Détection (client) | `client/Controllers/ScannerController`, `MimicVisuals` (indices) |
 | Minijeu | `shared/Logic/CaptureMinigame` (règles), `client/Controllers/CaptureController` (affichage) |
 | Inventaire de session | `server/Core/SessionInventory`, `server/Services/MemoryProfileStore` |
-| Interface | `client/UI/Theme`, `Hud`, `CollectionController`, `TutorialController` |
+| Interface | `client/UI/Theme`, `Hud` (positions calculées par `shared/Logic/HudLayout`, pur et testé), `CollectionController`, `TutorialController` |
 | Génération de la carte | `server/Map/MapLayout` (données), `MapBuilder`, `LightingSetup`, `shared/Builders/*` |
 
 ## 3. États d'un Mimic

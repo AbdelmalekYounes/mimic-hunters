@@ -67,9 +67,12 @@ puis vérification sur **la version installée** avec `RobloxStudioBeta.exe --fu
    compile le pilote avant chaque lancement pour l'éviter.
 5. `ExecuteMultiplayerTestAsync(2)` lance des **processus Studio clients séparés**. Ils héritent
    du bureau caché : aucun n'est apparu sur le bureau de l'utilisateur.
-6. **Sur le bureau caché, la vue 3D du client mesure 1×1 pixel** et la taille de l'interface ne
-   suit pas l'appareil simulé (800×600 au lieu de 844×390). La logique de l'interface se teste ;
-   sa **géométrie, non** (test marqué « ignoré » avec la raison).
+6. **Au démarrage du client, la caméra mesure 1×1 pixel** pendant une à deux secondes, le temps
+   que Studio dimensionne la vue. *Correction du 30/10/2026* : on avait d'abord attribué ce
+   1×1 au bureau caché, mais les captures de la VM ont montré une vue normale au même moment.
+   En attendant jusqu'à 5 s, la vue est dimensionnée **aussi sur le bureau caché**
+   (PC : 1187×575 ; iPhone 13 simulé : 749×389, encoches déduites), et la géométrie de
+   l'interface se vérifie dans les deux cas.
 7. La simulation d'appareil fonctionne depuis RunScript : avec `iphone_13`, le client voit
    `TouchEnabled = true`, `KeyboardEnabled = false`, et le HUD passe en disposition tactile.
    Le pilote arrête toujours la simulation à la fin (`StopSimulationAsync`).
@@ -146,7 +149,7 @@ compte aussi **tes propres** changements de fenêtre : seul « Studio a pris le 
 | Test | Sans monopoliser ton bureau | Session graphique visible nécessaire |
 |---|---|---|
 | Syntaxe, lint, formatage, build | ✅ CLI | |
-| 123 tests de logique pure (états, rencontres, minijeu, récompenses, concurrence, anti-triche, spam) | ✅ CLI (Lune) | |
+| 158 tests de logique pure (états, rencontres, minijeu, récompenses, concurrence, anti-triche, spam, disposition du HUD sur 9 écrans) | ✅ CLI (Lune) | |
 | Démarrage serveur, 3 zones, 41 objets posés, 6 espèces, RemoteEvents | ✅ Studio caché | |
 | Révélation, capture, récompense, rejeu, fuite, réapparition dans le vrai jeu | ✅ Studio caché | |
 | Concurrence dans le vrai jeu (2 captures parallèles) | ✅ Studio caché | |
@@ -154,7 +157,7 @@ compte aussi **tes propres** changements de fenêtre : seul « Studio a pris le 
 | 2 clients, déconnexion (`LeaveTest`), reconnexion (`AddPlayers`) | ✅ Studio caché | |
 | Interface : construction, mode PC vs tactile, textes, carte de découverte, compteur | ✅ Studio caché | |
 | Mode tactile via simulation d'appareil | ✅ Studio caché (simulation ≠ téléphone réel) | |
-| Géométrie de l'interface à la taille d'écran (débordements, safe area) | ⏭️ ignoré (vue 1×1) | ✅ |
+| Géométrie de l'interface à la taille d'écran (boutons dans l'écran) | ✅ Studio caché et VM : éléments dans l'écran et sans chevauchement (PC 1187×517 et 556×375, iPhone 13 simulé 749×331) | captures VM |
 | Rendu : couleurs, lumière, animations de révélation/capture/fuite, particules | | ✅ |
 | Lisibilité, confort tactile, son audible | | ✅ (humain) |
 | Performance (images/s, MicroProfiler, mémoire client) | | ✅ — et **jamais** une mesure de téléphone réel en simulation |
@@ -174,10 +177,10 @@ Rien de ce qui suit n'a été installé ni configuré : chaque option demande to
 **Choix retenu (30/10/2026) : VMware Workstation**, sans Hyper-V, donc sans effet sur les jeux
 et les émulateurs. Les scripts sont prêts : `test-vm.cmd` pilote la VM sans fenêtre, et un agent
 dans la VM exécute `test-all.ps1 -Visible -Screenshots`. Installation pas à pas et état de
-vérification : [VM_SETUP.md](VM_SETUP.md). La VM reste à créer.
+vérification : [VM_SETUP.md](VM_SETUP.md). La VM est en service depuis le 30/10/2026.
 
 Au quotidien, `test.cmd` (bureau caché) suffit pour l'intégration. `test-vm.cmd` sert aux
-vérifications visuelles : géométrie réelle et captures d'écran.
+vérifications visuelles : captures d'écran du rendu, du HUD et du minijeu.
 
 ## 8. Dépannage
 
@@ -187,7 +190,7 @@ vérifications visuelles : géométrie réelle et captures d'écran.
 | Délai dépassé (420 s) | Dialogue invisible de Studio : mise à jour, connexion expirée, récupération automatique | Ouvrir Studio normalement une fois, fermer le dialogue, relancer |
 | `rbxassetid://203785492 failed` dans la sortie | Boîte à outils de Studio | Bruit connu, filtré du rapport |
 | Session revenue avec `attempts = 2` | Démarrage trop précoce, relancé automatiquement | Rien à faire si elle a réussi |
-| `client.hud.tient_dans_l_ecran` ignoré | Vue 1×1 sur le bureau caché | Normal ; vérifier visuellement ou lancer `-Visible` |
+| `client.hud.tient_dans_l_ecran` ignoré | Vue restée sous 320×240 après 5 s d'attente | Inhabituel : relancer, ou vérifier avec `-Visible` ou dans la VM |
 | Plugin Rojo : « Can't parse JSON » | Plugin plus ancien que Rojo 7.7.1 | `rojo plugin install` (sans effet sur `test.cmd`) |
 
 ## 9. Fichiers

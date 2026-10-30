@@ -166,10 +166,14 @@ if ($studio) {
 	L "## Studio : isolation mesurée"
 	L ""
 	$iso = $studio.isolation
+	# Dans la VM de test, le « bureau » mesuré est celui de la VM, pas celui de l'utilisateur.
+	$inVm = (Get-CimInstance Win32_ComputerSystem).Model -match "VMware|Virtual"
+	$desk = if ($inVm) { "le bureau de la VM" } else { "ton bureau" }
+	if ($inVm) { L "Mesures prises **dans la machine virtuelle** : ton bureau n'est pas concerné."; L "" }
 	L "| Mesure | Valeur |"
 	L "|---|---|"
 	L ("| Bureau Windows caché | {0} |" -f $iso.hiddenDesktop)
-	L ("| Fenêtres Studio visibles sur ton bureau (max) | {0} |" -f $iso.studioWindowsOnUserDesktop)
+	L ("| Fenêtres Studio visibles sur {0} (max) | {1} |" -f $desk, $iso.studioWindowsOnUserDesktop)
 	L ("| Une fenêtre Studio a pris le premier plan | {0} |" -f $iso.studioTookForeground)
 	L ("| Le premier plan a changé pendant le test (toute cause, y compris toi) | {0} |" -f $iso.foregroundChangedDuringRun)
 	L ("| Durée Studio / code de sortie / délai dépassé | {0} s / {1} / {2} |" -f $studio.durationSec, $studio.exitCode, $studio.timedOut)
@@ -193,7 +197,7 @@ if ($studio) {
 		if ($s.deviceError) { $extra += "simulation : $($s.deviceError)" }
 		if ($s.report -and $s.report.clientEnv) {
 			$e = $s.report.clientEnv
-			$extra += "client : TouchEnabled=$($e.touchEnabled), KeyboardEnabled=$($e.keyboardEnabled), vue=$($e.viewport -join 'x')"
+			$extra += "client : TouchEnabled=$($e.touchEnabled), KeyboardEnabled=$($e.keyboardEnabled), vue=$($e.viewport -join 'x'), HUD=$($e.screen -join 'x') disposition $($e.layout)"
 		}
 		L ("- **{0}** ({1}) : {2:N1} s, {3} tentative(s). {4}" -f $s.name, $s.mode, $s.duration, $s.attempts, ($extra -join " · "))
 	}
@@ -214,7 +218,7 @@ L ""
 L "Ces points demandent une session **visible** (ton bureau, une machine virtuelle ou un autre PC) — voir docs/TESTING.md :"
 L ""
 L "- Rendu visuel : couleurs, lumière, animations des 6 révélations, fuites, particules."
-L "- Géométrie de l'interface à la taille réelle de l'écran (ignorée sur le bureau caché, vue 1×1)."
+L "- Chevauchements entre éléments du HUD et avec l'interface Roblox (chat, barre du haut) : le test vérifie seulement que les boutons restent dans l'écran."
 L "- Lisibilité et ergonomie tactile ; sons audibles."
 L "- Performance (images/s, MicroProfiler) — la simulation mobile de Studio n'est jamais une mesure sur téléphone réel."
 [IO.File]::WriteAllText((Join-Path $ReportDir "report.md"), $md.ToString(), (New-Object Text.UTF8Encoding $false))

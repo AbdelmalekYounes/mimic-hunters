@@ -5,10 +5,14 @@
 	Principes : rien ne masque le jeu en permanence ; les boutons d'action
 	sont regroupés en bas à droite, au-dessus du bouton de saut sur mobile ;
 	les panneaux (codex, capture) restent compacts.
+	Positions et tailles des éléments principaux : HudLayout (pur, testé), recalculées
+	quand la taille de l'écran change (rotation, fenêtre redimensionnée).
 ]]
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local HudLayout = require(ReplicatedStorage:WaitForChild("Shared").Logic.HudLayout)
 local Theme = require(script.Parent.Theme)
 
 local C = Theme.Colors
@@ -90,8 +94,6 @@ function Hud.build(): Refs
 	-- ── Compteur (haut gauche, sous la barre Roblox) ──
 	local counter = Theme.panel({
 		Name = "Counter",
-		Size = UDim2.fromOffset(240, 62),
-		Position = UDim2.fromOffset(12, 10),
 		Parent = gui,
 	})
 	Theme.padding(8).Parent = counter
@@ -113,17 +115,13 @@ function Hud.build(): Refs
 		Parent = counter,
 	})
 
-	-- ── Bandeau du tutoriel (haut centre) ──
+	-- ── Bandeau du tutoriel (haut, à droite du compteur ou dessous) ──
 	local banner = Theme.panel({
 		Name = "Banner",
-		AnchorPoint = Vector2.new(0.5, 0),
-		Size = UDim2.new(0.6, 0, 0, 58),
-		Position = UDim2.new(0.5, 0, 0, 10),
 		BackgroundColor3 = Color3.fromRGB(56, 36, 92),
 		Visible = false,
 		Parent = gui,
 	})
-	create("UISizeConstraint", { MaxSize = Vector2.new(620, 80), MinSize = Vector2.new(280, 40), Parent = banner })
 	Theme.padding(8).Parent = banner
 	local bannerText = Theme.text({
 		Name = "Text",
@@ -137,9 +135,6 @@ function Hud.build(): Refs
 	-- ── Notifications ──
 	local toasts = create("Frame", {
 		Name = "Toasts",
-		AnchorPoint = Vector2.new(0.5, 0),
-		Size = UDim2.new(0.5, 0, 0, 140),
-		Position = UDim2.new(0.5, 0, 0, 76),
 		BackgroundTransparency = 1,
 		Parent = gui,
 	}) :: Frame
@@ -151,13 +146,9 @@ function Hud.build(): Refs
 	})
 
 	-- ── Boutons d'action (bas droite) ──
-	local bottom = if touch then 190 else 24
 	local actionButton = Theme.button({
 		Name = "Action",
 		Text = "EXAMINER",
-		AnchorPoint = Vector2.new(1, 1),
-		Size = UDim2.fromOffset(if touch then 176 else 190, if touch then 66 else 62),
-		Position = UDim2.new(1, -20, 1, -bottom),
 		BackgroundColor3 = Color3.fromRGB(70, 52, 120),
 		StrokeColor = C.Mint,
 		Parent = gui,
@@ -167,9 +158,6 @@ function Hud.build(): Refs
 	local scanButton = Theme.button({
 		Name = "Scan",
 		Text = "SCAN",
-		AnchorPoint = Vector2.new(1, 1),
-		Size = UDim2.fromOffset(86, 86),
-		Position = UDim2.new(1, -20, 1, -(bottom + 78)),
 		BackgroundColor3 = Color3.fromRGB(40, 110, 130),
 		StrokeColor = C.Cyan,
 		Radius = 43,
@@ -192,9 +180,6 @@ function Hud.build(): Refs
 	local codexButton = Theme.button({
 		Name = "Codex",
 		Text = "CODEX",
-		AnchorPoint = Vector2.new(1, 1),
-		Size = UDim2.fromOffset(96, 46),
-		Position = UDim2.new(1, -116, 1, -(bottom + 78)),
 		BackgroundColor3 = Color3.fromRGB(110, 60, 110),
 		StrokeColor = C.Pink,
 		MaxTextSize = 18,
@@ -205,9 +190,6 @@ function Hud.build(): Refs
 	-- ── Lecture du scanner ──
 	local signal = Theme.panel({
 		Name = "Signal",
-		AnchorPoint = Vector2.new(1, 1),
-		Size = UDim2.fromOffset(240, 54),
-		Position = UDim2.new(1, -20, 1, -(bottom + 176)),
 		Visible = false,
 		Parent = gui,
 	})
@@ -237,17 +219,13 @@ function Hud.build(): Refs
 		table.insert(signalBars, bar)
 	end
 
-	-- ── Minijeu de capture (bas centre) ──
+	-- ── Minijeu de capture (bas, à gauche des boutons si la place manque) ──
 	local capture = Theme.panel({
 		Name = "Capture",
-		AnchorPoint = Vector2.new(0.5, 1),
-		Size = UDim2.new(0.62, 0, 0, if touch then 210 else 176),
-		Position = UDim2.new(0.5, 0, 1, if touch then -18 else -24),
 		BackgroundColor3 = Color3.fromRGB(30, 22, 48),
 		Visible = false,
 		Parent = gui,
 	})
-	create("UISizeConstraint", { MaxSize = Vector2.new(560, 260), MinSize = Vector2.new(300, 150), Parent = capture })
 	Theme.padding(12).Parent = capture
 	local captureTitle = Theme.text({
 		Name = "Title",
@@ -475,6 +453,34 @@ function Hud.build(): Refs
 		HorizontalAlignment = Enum.HorizontalAlignment.Center,
 		Parent = codexGrid,
 	})
+
+	-- ── Disposition (HudLayout), recalculée à chaque changement de taille ──
+	local placed: { [string]: GuiObject } = {
+		counter = counter,
+		banner = banner,
+		toasts = toasts,
+		action = actionButton,
+		scan = scanButton,
+		codex = codexButton,
+		signal = signal,
+		capture = capture,
+	}
+	local function applyLayout()
+		local size = gui.AbsoluteSize
+		if size.X < 2 or size.Y < 2 then
+			return -- vue pas encore dimensionnée
+		end
+		local layout = HudLayout.compute(size.X, size.Y, touch)
+		for key, object in placed do
+			local r = (layout :: any)[key] :: HudLayout.Rect
+			object.AnchorPoint = Vector2.zero
+			object.Position = UDim2.fromOffset(r.x, r.y)
+			object.Size = UDim2.fromOffset(r.w, r.h)
+		end
+		gui:SetAttribute("Layout", layout.mode)
+	end
+	applyLayout()
+	gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(applyLayout)
 
 	return {
 		gui = gui,

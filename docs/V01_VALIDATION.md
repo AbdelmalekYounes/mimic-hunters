@@ -26,6 +26,16 @@ ci-dessous et qui sont désormais **testés automatiquement** :
 
 Toujours **non couverts** : rendu, animations, sons audibles, performance, géométrie à la taille d'écran réelle.
 
+**Mise à jour (nuit du 30/10/2026)** : la VM VMware est en service, avec des captures d'écran
+automatiques. Le test de géométrie, enfin exécuté, a trouvé un **bug du HUD tactile** : sur un
+iPhone 13 simulé en paysage (HUD 749×331), SCAN et la lecture du scanner sortaient de l'écran
+par le haut, CODEX recouvrait le bandeau, et le bandeau le compteur. Sur tablette, le bouton
+d'action chevauchait de 20 px le grand bouton de saut. Corrigé : nouvelle disposition calculée
+par `HudLayout` (compacte sur téléphone), avec 35 tests Lune sur 9 tailles d'écran. Studio
+mesure désormais, sur PC et en mobile simulé, que tout reste dans l'écran sans se chevaucher :
+44/44 sur ton PC et dans la VM. Restent : le confort tactile et un vrai téléphone (la
+simulation n'en tient pas lieu).
+
 ## 1. Résultats des outils (exécutés)
 
 | Commande | Résultat |
@@ -134,4 +144,5 @@ provient de la Boîte à outils de Studio (contexte « Studio »).
 | Texte du minijeu chevauchant le bouton IMPULSION | largeur réduite, retour à la ligne |
 | Lecture du scanner tronquée | panneau élargi (190 → 240 px) |
 | Gâchette R2 de manette pouvant déclencher des impulsions | liaison retirée |
+| HUD tactile hors de l'écran sur téléphone en paysage ; bouton d'action sur le saut (tablette) | `HudLayout` : disposition compacte, recalcul à chaque changement de taille, signal masqué pendant la capture |
 | Débogage | journal serveur des impulsions et captures + `_G.MimicHuntWorld` (Studio uniquement) |

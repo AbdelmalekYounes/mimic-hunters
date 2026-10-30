@@ -177,6 +177,8 @@ local function onCaptureStarted(payload: any)
 	refs.feedback.TextColor3 = Theme.Colors.Muted
 	refreshCounters(a)
 	layoutStage(a.stage)
+	-- Sur téléphone, la lecture du scanner occupe la place du minijeu : elle n'a plus d'utilité ici.
+	refs.signal.Visible = false
 	refs.capture.Visible = true
 	ClientState.attemptActive = true
 	ClientState.AttemptChanged:Fire(true)

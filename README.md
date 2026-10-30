@@ -59,7 +59,7 @@ test.cmd -SkipStudio   :: ligne de commande seulement (≈ 2 s)
 Rapport : `build/test-reports/latest.md`. Commandes individuelles :
 
 ```bash
-lune run tests/run          # 123 tests unitaires et d'intégration (logique pure)
+lune run tests/run          # 158 tests unitaires et d'intégration (logique pure)
 lune run tests/run capture  # seulement les fichiers dont le nom contient « capture »
 lune run tests/check        # compile tous les fichiers .luau (vérification de syntaxe)
 selene src                  # lint (std Roblox)
