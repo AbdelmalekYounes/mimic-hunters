@@ -116,6 +116,7 @@ docs/                  GAME_DESIGN, ARCHITECTURE, ROADMAP, V01_VALIDATION, scree
 - [docs/ROADMAP.md](docs/ROADMAP.md) — jalons et suite
 - [docs/V01_VALIDATION.md](docs/V01_VALIDATION.md) — ce qui est implémenté, testé, et les limites
 - [docs/TESTING.md](docs/TESTING.md) — tests automatisés Studio sans monopoliser le PC
+- [docs/VM_SETUP.md](docs/VM_SETUP.md) — VM VMware pour les tests graphiques (`test-vm.cmd`)
 
 ## Outils de débogage (Studio uniquement)
 

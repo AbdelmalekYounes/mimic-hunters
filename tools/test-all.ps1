@@ -24,6 +24,7 @@ param(
 	[switch]$SkipStudio,
 	[string[]]$Sessions = @("server", "client", "mobile", "multiplayer"),
 	[switch]$Visible,
+	[switch]$Screenshots,
 	[int]$StudioTimeoutSec = 420
 )
 
@@ -97,6 +98,7 @@ if (-not $SkipStudio) {
 	$t0 = Get-Date
 	$studioArgs = @{ Sessions = $Sessions; ReportDir = $ReportDir; TimeoutSec = $StudioTimeoutSec }
 	if ($Visible) { $studioArgs.Visible = $true }
+	if ($Screenshots) { $studioArgs.Screenshots = $true }
 	$studioOk = $true
 	try {
 		& (Join-Path $PSScriptRoot "studio-tests.ps1") @studioArgs | Tee-Object -FilePath (Join-Path $ReportDir "studio-console.txt") | Out-Host
@@ -116,8 +118,15 @@ if (-not $SkipStudio) {
 
 # ── Contexte ────────────────────────────────────────────────────────────
 function Tool-Version([string]$tool) { (Invoke-Tool $tool "--version" $Root).Output.Trim() -split "`n" | Select-Object -First 1 }
-$git = (Invoke-Tool "git" "rev-parse --short HEAD" $Root).Output.Trim()
-$dirty = ((Invoke-Tool "git" "status --porcelain" $Root).Output.Trim().Length -gt 0)
+$gitRun = Invoke-Tool "git" "rev-parse --short HEAD" $Root
+if ($gitRun.ExitCode -eq 0) {
+	$git = $gitRun.Output.Trim()
+	$dirty = ((Invoke-Tool "git" "status --porcelain" $Root).Output.Trim().Length -gt 0)
+} else {
+	# Copie sans dépôt Git (VM de test) : l'hôte transmet le commit.
+	$git = if ($env:MIMIC_COMMIT) { $env:MIMIC_COMMIT } else { "inconnu" }
+	$dirty = $false
+}
 $context = [ordered]@{
 	date = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
 	machine = $env:COMPUTERNAME
@@ -127,6 +136,7 @@ $context = [ordered]@{
 	lune = Tool-Version "lune"; rojo = Tool-Version "rojo"; selene = Tool-Version "selene"; stylua = Tool-Version "stylua"
 	studioVersion = if ($studio) { $studio.studioVersion } else { "non exécuté" }
 	studioExe = if ($studio) { $studio.studioExe } else { "" }
+	screen = (Get-CimInstance Win32_VideoController | Where-Object { $_.CurrentHorizontalResolution } | ForEach-Object { "$($_.CurrentHorizontalResolution)x$($_.CurrentVerticalResolution)" }) -join ", "
 }
 $allOk = -not ($steps | Where-Object { -not $_.ok })
 $totalSec = [math]::Round(((Get-Date) - $suiteStart).TotalSeconds, 1)
@@ -163,6 +173,7 @@ if ($studio) {
 	L ("| Une fenêtre Studio a pris le premier plan | {0} |" -f $iso.studioTookForeground)
 	L ("| Le premier plan a changé pendant le test (toute cause, y compris toi) | {0} |" -f $iso.foregroundChangedDuringRun)
 	L ("| Durée Studio / code de sortie / délai dépassé | {0} s / {1} / {2} |" -f $studio.durationSec, $studio.exitCode, $studio.timedOut)
+	if ($studio.screenshots -gt 0) { L ("| Captures d'écran (dossier ``screenshots/``) | {0} |" -f $studio.screenshots) }
 	L ""
 	L "## Studio : tests"
 	L ""

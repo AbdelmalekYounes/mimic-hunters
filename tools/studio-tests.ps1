@@ -23,7 +23,10 @@ param(
 	[int]$TimeoutSec = 420,
 	[switch]$Visible,
 	[string]$StudioExe,
-	[string]$MobileDevice = "iphone_13"
+	[string]$MobileDevice = "iphone_13",
+	# Captures d'écran périodiques (uniquement avec -Visible, prévu pour la VM de test).
+	[switch]$Screenshots,
+	[double]$ScreenshotIntervalSec = 2
 )
 
 $ErrorActionPreference = "Stop"
@@ -83,9 +86,42 @@ $outputLog = Join-Path $ReportDir "studio-output.log"   # Studio exige l'extensi
 Add-Type -TypeDefinition (Get-Content -Raw (Join-Path $PSScriptRoot "HiddenDesktopRunner.cs"))
 $cmd = "`"$exe`" --task RunScript --localPlaceFile `"$place`" --runScriptFile `"$driverPath`" --outputFile `"$outputLog`" --quitAfterExecution"
 $launchTime = Get-Date
+
+# Captures d'écran : un processus séparé photographie l'écran jusqu'à la fin de Studio.
+$shotJob = $null
+$shotStop = Join-Path $ReportDir "screenshots.stop"
+if ($Screenshots -and -not $Visible) {
+	Write-Warning "-Screenshots ignoré : sans -Visible, Studio tourne sur un bureau caché (rien à photographier)."
+} elseif ($Screenshots) {
+	$shotDir = Join-Path $ReportDir "screenshots"
+	New-Item -ItemType Directory -Force -Path $shotDir | Out-Null
+	$shotJob = Start-Job -ArgumentList $shotDir, $shotStop, $ScreenshotIntervalSec -ScriptBlock {
+		param($dir, $stopFile, $interval)
+		Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+		$i = 0
+		while (-not (Test-Path $stopFile)) {
+			try {
+				$b = [System.Windows.Forms.SystemInformation]::VirtualScreen
+				$bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+				$g = [System.Drawing.Graphics]::FromImage($bmp)
+				$g.CopyFromScreen($b.Left, $b.Top, 0, 0, $bmp.Size)
+				$i++
+				$bmp.Save((Join-Path $dir ("{0:D4}.png" -f $i)), [System.Drawing.Imaging.ImageFormat]::Png)
+				$g.Dispose(); $bmp.Dispose()
+			} catch { }
+			Start-Sleep -Milliseconds ([int]($interval * 1000))
+		}
+	}
+}
 Write-Host ("Studio : {0} ({1})" -f $exe, $(if ($Visible) { "bureau de l'utilisateur" } else { "bureau caché" }))
 Write-Host ("Sessions : {0}" -f (($selected | ForEach-Object { $_.name }) -join ", "))
 $run = [HiddenDesktopRunner]::Run($cmd, $TimeoutSec * 1000, -not $Visible, "MimicHuntersTests", "RobloxStudioBeta")
+if ($shotJob) {
+	New-Item -ItemType File -Force -Path $shotStop | Out-Null
+	Wait-Job $shotJob -Timeout 15 | Out-Null
+	Remove-Job $shotJob -Force
+	Remove-Item $shotStop -ErrorAction SilentlyContinue
+}
 if ($run.Error) { throw "Lancement impossible : $($run.Error)" }
 
 # Nettoyage : uniquement les processus Studio enfants de NOTRE lancement (clients multijoueur).
@@ -151,6 +187,7 @@ $result = [pscustomobject]@{
 		foregroundChangedDuringRun = $run.ForegroundChanged
 	}
 	devices = if ($devices) { $devices.data } else { $null }
+	screenshots = @(Get-ChildItem (Join-Path $ReportDir "screenshots\*.png") -ErrorAction SilentlyContinue).Count
 	sessions = $sessionsOut
 	tests = $tests
 	anomalies = $anomalies

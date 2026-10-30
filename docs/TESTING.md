@@ -171,9 +171,13 @@ Rien de ce qui suit n'a été installé ni configuré : chaque option demande to
 | **Windows Sandbox** (Pro) | vGPU activé par défaut, mais repart de zéro à chaque lancement : réinstallation de Studio et reconnexion au compte à chaque fois | Jetable | Connexion Roblox manuelle à chaque session ; fonctionnalité Windows à activer |
 | **Moniteur virtuel** (« Meta Virtual Monitor » est déjà présent) | rendu réel sur GPU | Pas de VM | Les fenêtres restent dans **ta** session : prise de focus toujours possible → ne résout pas le problème |
 
-Recommandation : garder `test.cmd` (bureau caché) pour l'intégration quotidienne. Pour les
-vérifications visuelles, faire une courte session manuelle (`test.cmd -Visible`, ou Studio
-normalement) au moment choisi, ou utiliser un second PC si cela devient fréquent.
+**Choix retenu (30/10/2026) : VMware Workstation**, sans Hyper-V, donc sans effet sur les jeux
+et les émulateurs. Les scripts sont prêts : `test-vm.cmd` pilote la VM sans fenêtre, et un agent
+dans la VM exécute `test-all.ps1 -Visible -Screenshots`. Installation pas à pas et état de
+vérification : [VM_SETUP.md](VM_SETUP.md). La VM reste à créer.
+
+Au quotidien, `test.cmd` (bureau caché) suffit pour l'intégration. `test-vm.cmd` sert aux
+vérifications visuelles : géométrie réelle et captures d'écran.
 
 ## 8. Dépannage
 
@@ -194,6 +198,8 @@ normalement) au moment choisi, ou utiliser un second PC si cela devient fréquen
 | `tools/test-all.ps1` | Orchestration, contexte, rapport Markdown/JSON |
 | `tools/studio-tests.ps1` | Build, génération du pilote, lancement de Studio, analyse |
 | `tools/HiddenDesktopRunner.cs` | Lancement sur bureau caché + mesures d'isolation |
+| `test-vm.cmd`, `tools/vm-tests.ps1` | Hôte : démarre la VM sans fenêtre, dépose la tâche, récupère le rapport |
+| `tools/vm-agent.ps1`, `tools/vm-guest-setup.ps1` | Invité : agent de tests et préparation unique de la VM |
 | `tests/studio/Driver.template.luau` | Pilote RunScript (sessions, simulation d'appareil, réessai) |
 | `tests/studio/ServerSuite.server.luau` | Tests dans le serveur de session |
 | `tests/studio/ClientSuite.client.luau` | Tests dans le client de session (réseau + HUD) |
