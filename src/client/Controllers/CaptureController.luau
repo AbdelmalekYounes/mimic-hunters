@@ -126,8 +126,8 @@ local function bindInput()
 		Enum.ContextActionPriority.High.Value + 50,
 		Enum.KeyCode.Space,
 		Enum.UserInputType.MouseButton1,
-		Enum.KeyCode.ButtonA,
-		Enum.KeyCode.ButtonR2
+		-- Pas de gâchette analogique : une manette virtuelle peut envoyer des appuis parasites.
+		Enum.KeyCode.ButtonA
 	)
 end
 

@@ -206,7 +206,7 @@ function Hud.build(): Refs
 	local signal = Theme.panel({
 		Name = "Signal",
 		AnchorPoint = Vector2.new(1, 1),
-		Size = UDim2.fromOffset(190, 54),
+		Size = UDim2.fromOffset(240, 54),
 		Position = UDim2.new(1, -20, 1, -(bottom + 176)),
 		Visible = false,
 		Parent = gui,
@@ -337,10 +337,11 @@ function Hud.build(): Refs
 		Name = "Feedback",
 		Text = "",
 		Font = Theme.Fonts.Title,
-		Size = UDim2.new(0.5, 0, 0, 30),
+		Size = UDim2.new(0.4, 0, 0, 44),
 		Position = UDim2.fromOffset(0, 92),
 		TextXAlignment = Enum.TextXAlignment.Left,
-		MaxTextSize = 26,
+		TextWrapped = true,
+		MaxTextSize = 22,
 		Parent = capture,
 	})
 	local pulseButton = Theme.button({

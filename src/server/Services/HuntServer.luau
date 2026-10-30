@@ -48,8 +48,39 @@ function HuntServer.start()
 		return os.clock()
 	end
 
+	local studio = RunService:IsStudio()
+	if studio then
+		-- Accès de débogage depuis la barre de commande de Studio (serveur seulement).
+		-- selene: allow(global_usage)
+		(_G :: any).MimicHuntWorld = world
+	end
+
 	local function dispatch(events: { HuntWorld.Event })
 		for _, event in events do
+			if studio and event.name == "CaptureResolved" then
+				local p = event.payload
+				print(
+					string.format(
+						"[MimicHunters] capture %s : joueur %s, %s (%s)",
+						if p.success then "réussie" else "échouée",
+						tostring(event.userId),
+						tostring(p.speciesId),
+						tostring(p.reason or (if p.isNew then "nouvelle espèce" else "doublon"))
+					)
+				)
+			elseif studio and event.name == "PulseResult" and event.payload.ok then
+				local p = event.payload
+				print(
+					string.format(
+						"[MimicHunters] impulsion %s : %s à %.2f (%d/%d)",
+						tostring(p.attemptId),
+						if p.hit then "réussie" else "ratée",
+						p.position or -1,
+						p.hits or 0,
+						p.misses or 0
+					)
+				)
+			end
 			local remote = remotes[event.name]
 			if remote == nil then
 				warn("[HuntServer] RemoteEvent inconnu :", event.name)

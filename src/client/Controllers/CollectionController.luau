@@ -95,7 +95,7 @@ local function refreshCard(species: any)
 	card.name.Text = if discovered then species.name else "???"
 	card.rarity.Text = if rarity then rarity.displayName else ""
 	card.rarity.TextColor3 = if rarity then Theme.rgb(rarity.color) else Theme.Colors.Muted
-	card.count.Text = if discovered then string.format("x%d", count) else "Non découvert"
+	card.count.Text = if discovered then string.format("x%d", count) else ""
 	card.description.Text = if discovered
 		then species.description
 		else string.format("Se cache en %s.", MimicCatalog.kindName(species.kind))
@@ -131,7 +131,7 @@ local function buildCards()
 		local rarity = Theme.text({
 			Text = "",
 			Font = Theme.Fonts.Bold,
-			Size = UDim2.new(0.6, -6, 0, 16),
+			Size = UDim2.new(0.62, -6, 0, 16),
 			Position = UDim2.fromOffset(6, 126),
 			TextXAlignment = Enum.TextXAlignment.Left,
 			MaxTextSize = 14,
@@ -142,7 +142,7 @@ local function buildCards()
 			Font = Theme.Fonts.Bold,
 			TextColor3 = Theme.Colors.Mint,
 			AnchorPoint = Vector2.new(1, 0),
-			Size = UDim2.new(0.5, -6, 0, 16),
+			Size = UDim2.new(0.35, -6, 0, 16),
 			Position = UDim2.new(1, -6, 0, 126),
 			TextXAlignment = Enum.TextXAlignment.Right,
 			MaxTextSize = 14,

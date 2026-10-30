@@ -336,7 +336,9 @@ function PropBuilder.build(kind: string, variant: number?): Model
 	model.Name = kind
 	local body = builder(model, PropBuilder.colorFor(kind, variant))
 	model.PrimaryPart = body
-	model.WorldPivot = CFrame.identity
+	-- Avec une PrimaryPart, le pivot du Model est PrimaryPart.CFrame * PivotOffset
+	-- (WorldPivot est alors ignoré) : on ramène le pivot à la base de l'objet.
+	body.PivotOffset = body.CFrame:Inverse()
 	model:SetAttribute("PropKind", kind)
 	return model
 end
