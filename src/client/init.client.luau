@@ -23,6 +23,7 @@ local CollectionController = require(script.Controllers.CollectionController)
 local TutorialController = require(script.Controllers.TutorialController)
 local TitleController = require(script.Controllers.TitleController)
 local MuseumController = require(script.Controllers.MuseumController)
+local HuntController = require(script.Controllers.HuntController)
 
 local refs = Hud.build()
 
@@ -38,6 +39,7 @@ CollectionController.start(refs)
 TutorialController.start(refs)
 TitleController.start()
 MuseumController.start(refs)
+HuntController.init(refs)
 
 Remotes.get("MimicUpdate").OnClientEvent:Connect(function(payload)
 	ClientState.applyUpdate(payload)

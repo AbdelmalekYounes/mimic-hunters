@@ -309,6 +309,7 @@ function HuntServer.start()
 		end,
 		studio = studio,
 		rng = Rng.new(seed + 7),
+		positionOf = positionOf,
 	})
 	if studio then
 		-- selene: allow(global_usage)
@@ -349,10 +350,19 @@ function HuntServer.start()
 	end))
 
 	remotes.RequestScan.OnServerEvent:Connect(guarded("RequestScan", function(player: Player)
+		-- Pendant une Museum Hunt, le scanner sert au défi.
+		if museum.hunting(player.UserId) then
+			museum.scan(player)
+			return
+		end
 		dispatch((world:scan(player.UserId, positionOf(player), now())))
 	end))
 
 	remotes.RequestInspect.OnServerEvent:Connect(guarded("RequestInspect", function(player: Player, propId: any)
+		if museum.isHuntProp(propId) then
+			museum.inspect(player, propId)
+			return
+		end
 		dispatch((world:inspect(player.UserId, positionOf(player), propId, now())))
 	end))
 
@@ -401,6 +411,7 @@ function HuntServer.start()
 			end
 		end
 		dispatch(world:tick(now(), positions))
+		museum.tick(positions)
 	end))
 
 	return world

@@ -836,6 +836,105 @@ local function runTests(payload: any)
 		)
 	end)
 
+	check("chasse.partie_complete_reseau", function()
+		expect(env.collector, "pré-requis : collectionneur préparé")
+		local HuntController = require(clientRoot.Controllers.HuntController) :: any
+		local PropTracker = require(clientRoot.Controllers.PropTracker) :: any
+		local collectorMuseum = museumOf(env.collector) :: Model
+		local updates = {}
+		local conn = remote("HuntUpdate").OnClientEvent:Connect(function(p)
+			table.insert(updates, p)
+		end)
+		local function waitPhase(phase: string, timeout: number): any
+			local deadline = os.clock() + timeout
+			while os.clock() < deadline do
+				for _, u in updates do
+					if u.phase == phase then
+						return u
+					end
+				end
+				task.wait(0.1)
+			end
+			return nil
+		end
+		-- Devant le panneau du défi (le visiteur est à l'entrée du musée visité).
+		HuntController.start(env.collector)
+		local started = waitPhase("start", 5)
+		local refused = waitPhase("refused", 0.1)
+		expect(started ~= nil, "défi non lancé : " .. tostring(refused and refused.reason))
+		expect(HuntController.ui().status.frame.Visible, "barre de la Museum Hunt non affichée")
+		-- Attend que les objets du jardin soient répliqués.
+		local props = {}
+		local deadline = os.clock() + 4
+		while #props < 8 and os.clock() < deadline do
+			props = {}
+			for id, model in PropTracker.all() do
+				if model:GetAttribute("HuntId") == started.huntId and model.Parent then
+					table.insert(props, { id = id, model = model })
+				end
+			end
+			task.wait(0.1)
+		end
+		expect(#props == 8, "objets du jardin visibles : " .. #props)
+		local huntScan = request("RequestScan", "ScanResult", 5)
+		expect(huntScan and huntScan.ok and huntScan.hunt, "scan du défi : " .. tostring(huntScan and huntScan.reason))
+		frameMuseum(collectorMuseum, CFrame.new(0, 13, -30), Vector3.new(0, 0, -11))
+		task.wait(VIEW_PAUSE)
+		-- Examine les objets un par un (le client ignore lesquels sont des copies).
+		local root = rootPart() :: BasePart
+		local found = 0
+		for _, prop in props do
+			if waitPhase("end", 0) then
+				break
+			end
+			if prop.model.Parent == nil then
+				continue
+			end
+			local pivot = prop.model:GetPivot()
+			root.CFrame = CFrame.new(pivot.Position + Vector3.new(0, 3, 0) + pivot.LookVector * 3)
+			-- Le serveur doit avoir reçu la nouvelle position du personnage (réplication).
+			task.wait(0.6)
+			local reply = request("RequestInspect", "InspectResult", 5, prop.id)
+			if reply and not reply.ok and reply.reason == "OutOfRange" then
+				task.wait(0.8)
+				reply = request("RequestInspect", "InspectResult", 5, prop.id)
+			end
+			expect(reply and reply.ok, "examen refusé : " .. tostring(reply and reply.reason))
+			if reply.result == "HuntFound" then
+				found += 1
+				task.wait(0.5)
+			else
+				task.wait(1.05)
+			end
+		end
+		local finished = waitPhase("end", 5)
+		conn:Disconnect()
+		expect(finished ~= nil, "pas de résultat de fin")
+		expect(
+			finished.reason == "Complete" and finished.found == started.total,
+			string.format("fin : %s, %d/%d", tostring(finished.reason), finished.found or -1, started.total)
+		)
+		expect(found == started.total, "copies trouvées côté client : " .. found)
+		expect(finished.score > 0 and finished.newRecord == true, "score / record : " .. tostring(finished.score))
+		expect(finished.museums == 1, "musées différents : " .. tostring(finished.museums))
+		task.wait(0.4)
+		expect(HuntController.ui().result.frame.Visible, "carte de résultat non affichée")
+		expect(not HuntController.ui().status.frame.Visible, "barre du défi restée affichée")
+		env.huntScore = finished.score
+		task.wait(VIEW_PAUSE)
+		-- Rejouer tout de suite : refusé (anti-répétition).
+		updates = {}
+		conn = remote("HuntUpdate").OnClientEvent:Connect(function(p)
+			table.insert(updates, p)
+		end)
+		root.CFrame = (collectorMuseum.PrimaryPart :: BasePart).CFrame * CFrame.new(0, 3, -19)
+		task.wait(0.2)
+		HuntController.start(env.collector)
+		local again = waitPhase("refused", 3)
+		conn:Disconnect()
+		expect(again and again.reason == "Cooldown", "rejouer immédiatement : " .. tostring(again and again.reason))
+	end)
+
 	check("musee.retour_village", function()
 		releaseCamera()
 		local reply = travel("village")

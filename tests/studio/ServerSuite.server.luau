@@ -17,7 +17,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local StudioTestService = game:GetService("StudioTestService")
 
-local SUITE_TIMEOUT = 120
+-- V0.3 : la suite client (musées, Museum Hunt, pauses pour captures) dure ~100 s.
+local SUITE_TIMEOUT = 300
 local suiteStart = os.clock()
 local args = StudioTestService:GetTestArgs() or {}
 local suite = if type(args) == "table" then args.suite else nil
@@ -699,6 +700,51 @@ local function serverSuite()
 		service:release(R, final)
 	end)
 
+	check("chasse.objets_trouvailles_et_annulation", function()
+		local MuseumLayoutS = require(ServerRoot.Map.MuseumLayout)
+		local core = museum.core
+		local VIS = -7007
+		world:addPlayer(VIS, os.clock(), collectorProfile(VIS))
+		museum.onPlayerReady(VIS)
+		local plot = core:plotOf(M)
+		local sign = MuseumLayoutS.toWorld(plot, MuseumLayoutS.HuntSign)
+		local events, reply = core:startHunt(VIS, M, sign, os.clock())
+		museum.run(events)
+		expect(reply.ok, "défi refusé : " .. tostring(reply.reason))
+		local refs = museum.plots[plot]
+		local spawned = 0
+		for _, child in refs.hunt:GetChildren() do
+			if child:IsA("Model") and CollectionService:HasTag(child, "MimicProp") then
+				spawned += 1
+				expect(
+					string.sub(child:GetAttribute("PropId"), 1, 2) == "MH",
+					"identifiant d'objet : " .. tostring(child:GetAttribute("PropId"))
+				)
+				expect(child:GetAttribute("Copy") == nil, "l'objet révèle s'il abrite une copie")
+			end
+		end
+		expect(spawned == 8, "objets du jardin : " .. spawned)
+		-- Une copie trouvée disparaît ; le vrai Mimic reste dans sa vitrine.
+		local hunt = core:huntOf(VIS)
+		for _, entry in hunt.props do
+			if entry.copy then
+				local spot = MuseumLayoutS.toWorld(plot, MuseumLayoutS.HuntSpots[entry.spot])
+				museum.run((core:huntInspect(VIS, spot, entry.propId, os.clock())))
+				expect(refs.hunt:FindFirstChild(entry.propId) == nil, "copie trouvée toujours présente")
+				break
+			end
+		end
+		expect(#exhibitModels(refs) >= 5, "vitrines du propriétaire touchées par le défi")
+		-- Le propriétaire part pendant le défi : défi annulé, objets retirés, musée fermé.
+		museum.onPlayerRemoving(M)
+		world:removePlayer(M, os.clock())
+		expect(core:huntOf(VIS) == nil, "défi toujours actif après le départ du propriétaire")
+		expect(#refs.hunt:GetChildren() == 0, "objets de chasse restés après annulation")
+		expect(world:inventoryOf(VIS):profile().hunts.played == 0, "un défi annulé a été compté")
+		museum.onPlayerRemoving(VIS)
+		world:removePlayer(VIS, os.clock())
+	end)
+
 	check("musee.liberation_parcelle", function()
 		museum.onPlayerRemoving(M)
 		world:removePlayer(M, os.clock())
@@ -818,9 +864,9 @@ local function clientSuite()
 	if player == nil then
 		return nil
 	end
-	local report = askClient(player, { device = args.device }, 60)
+	local report = askClient(player, { device = args.device }, 180)
 	check("client.rapport_recu", function()
-		expect(report ~= nil, "aucun rapport du client en 60 s")
+		expect(report ~= nil, "aucun rapport du client en 180 s")
 	end)
 	if report then
 		for _, r in report.results or {} do

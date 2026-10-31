@@ -10,6 +10,7 @@
 	MuseumCore ; ce module ne fait qu'appliquer.
 ]]
 
+local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -17,6 +18,7 @@ local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared.Config.GameConfig)
 local MimicCatalog = require(Shared.Config.MimicCatalog)
+local PropBuilder = require(Shared.Builders.PropBuilder)
 
 local Server = script.Parent.Parent
 local MuseumCore = require(Server.Core.MuseumCore)
@@ -127,10 +129,51 @@ function MuseumServer.start(context: any)
 		character:PivotTo(target)
 	end
 
-	-- Objets de la Museum Hunt (créés, retirés) : jalon 6.
-	local huntProps: { [string]: { Instance } } = {}
-	MuseumServer._huntProps = huntProps
-	MuseumServer._plots = plots
+	-- Objets de la Museum Hunt : objets ordinaires du jeu (PropBuilder), tagués comme ceux du
+	-- monde pour que le client les cible et y joue les indices sans code particulier.
+	-- Le modèle ne dit jamais s'il abrite une copie : seul MuseumCore le sait.
+	local huntProps: { [string]: { [string]: Model } } = {}
+
+	handlers._HuntSpawn = function(event)
+		local p = event.payload
+		local refs = plots[p.plot]
+		if refs == nil then
+			return
+		end
+		local list = {}
+		local garden = MuseumBuilder.localCFrame(p.plot, MuseumLayout.HuntZone.center, 0)
+		for _, prop in p.props do
+			local model = PropBuilder.build(prop.kind, prop.variant)
+			local spot = MuseumBuilder.localCFrame(p.plot, MuseumLayout.HuntSpots[prop.spot], 0)
+			-- Tourné vers l'allée centrale du jardin.
+			model:PivotTo(CFrame.lookAt(spot.Position, Vector3.new(garden.X, spot.Y, spot.Z)))
+			model.Name = prop.propId
+			model:SetAttribute("PropId", prop.propId)
+			model:SetAttribute("Zone", "Museum")
+			model:SetAttribute("HuntId", p.huntId)
+			model.Parent = refs.hunt
+			CollectionService:AddTag(model, "MimicProp")
+			list[prop.propId] = model
+		end
+		huntProps[p.huntId] = list
+	end
+
+	handlers._HuntRemoveProp = function(event)
+		local list = huntProps[event.payload.huntId]
+		local model = list and list[event.payload.propId]
+		if model then
+			list[event.payload.propId] = nil
+			model:Destroy()
+		end
+	end
+
+	handlers._HuntDespawn = function(event)
+		local list = huntProps[event.payload.huntId]
+		huntProps[event.payload.huntId] = nil
+		for _, model in list or {} do
+			model:Destroy()
+		end
+	end
 
 	local function handle(event: any): boolean
 		local handler = handlers[event.name]
@@ -168,6 +211,9 @@ function MuseumServer.start(context: any)
 	remotes.RequestMuseums.OnServerEvent:Connect(guarded("RequestMuseums", function(player: Player)
 		dispatch((core:list(player.UserId, now())))
 	end))
+	remotes.StartMuseumHunt.OnServerEvent:Connect(guarded("StartMuseumHunt", function(player: Player, ownerId: any)
+		dispatch((core:startHunt(player.UserId, ownerId, context.positionOf(player), now())))
+	end))
 
 	local service = {
 		core = core,
@@ -189,6 +235,22 @@ function MuseumServer.start(context: any)
 	end
 	function service.onPlayerRemoving(userId: number)
 		dispatch(core:leave(userId, now()))
+	end
+	-- Routage des scans et examens : pendant une Museum Hunt, ils vont au défi.
+	function service.hunting(userId: number): boolean
+		return core:huntOf(userId) ~= nil
+	end
+	function service.isHuntProp(propId: any): boolean
+		return type(propId) == "string" and string.sub(propId, 1, 2) == "MH"
+	end
+	function service.scan(player: Player)
+		dispatch((core:huntScan(player.UserId, context.positionOf(player), now())))
+	end
+	function service.inspect(player: Player, propId: any)
+		dispatch((core:huntInspect(player.UserId, context.positionOf(player), propId, now())))
+	end
+	function service.tick(positions: { [number]: any })
+		dispatch(core:tick(now(), positions))
 	end
 
 	return service

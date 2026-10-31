@@ -97,6 +97,33 @@ local GameConfig = {
 		Hunt = { capacity = 6, refillPerSecond = 3 },
 	},
 
+	-- Museum Hunt (V0.3) : mini-chasse dans le jardin d'un musée visité.
+	MuseumHunt = {
+		Duration = 75,
+		-- Copies de Mimics du propriétaire cachées parmi les 8 cachettes ; le reste = leurres.
+		Copies = 3,
+		-- Distance maximale pour lancer le défi (panneau) et pour examiner une cachette.
+		StartRange = 12,
+		InspectRange = 11,
+		-- S'éloigner du jardin au-delà de ce rayon annule le défi.
+		ZoneRadius = 26,
+		ScanCooldown = 2.5,
+		InspectCooldown = 0.4,
+		MissCooldown = 1.0,
+		-- Bandes du scanner (distance à la copie non trouvée la plus proche).
+		StrongBand = 7,
+		MediumBand = 14,
+		WeakBand = 24,
+		-- Score : trouvailles, ratés, bonus de temps si tout est trouvé.
+		FoundPoints = 100,
+		MissPenalty = 15,
+		TimeBonusPerSecond = 2,
+		ClueIntervalMin = 5,
+		ClueIntervalMax = 8,
+		-- Délai entre deux défis pour un même visiteur (anti-répétition).
+		RepeatCooldown = 20,
+	},
+
 	-- Sauvegardes (voir ProfileService pour le détail des délais).
 	Save = {
 		-- Expérience publiée.
