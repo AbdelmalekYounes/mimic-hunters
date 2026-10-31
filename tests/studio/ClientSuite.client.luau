@@ -791,6 +791,51 @@ local function runTests(payload: any)
 		task.wait(VIEW_PAUSE)
 	end)
 
+	check("musee.panneau_visites_et_protections", function()
+		expect(env.collector, "pré-requis : collectionneur préparé")
+		local VisitsTab = require(clientRoot.UI.VisitsTab) :: any
+		releaseCamera()
+		CollectionPanel.setOpen(true)
+		CollectionPanel.showTab("Visits")
+		local entry = nil
+		local deadline = os.clock() + 4
+		while entry == nil and os.clock() < deadline do
+			for _, e in VisitsTab.entries() do
+				if e.userId == env.collector then
+					entry = e
+				end
+			end
+			task.wait(0.1)
+		end
+		expect(entry ~= nil, "musée du collectionneur absent de la liste")
+		expect(
+			entry.discovered == 6 and entry.exhibited == 6 and entry.mutationsExhibited == 3,
+			string.format("statistiques : %d / %d / %d", entry.discovered, entry.exhibited, entry.mutationsExhibited)
+		)
+		local row = VisitsTab.ui().list:FindFirstChild("Museum_" .. tostring(env.collector)) :: GuiObject
+		expect(row and inside(row, panel), "ligne du musée invisible ou hors du panneau")
+		task.wait(VIEW_PAUSE)
+		VisitsTab.visit(env.collector)
+		task.wait(0.5)
+		expect(not panel.Visible, "le panneau devrait se fermer pour la visite")
+		-- Protections : rien ne change chez le collectionneur, quoi que tente le visiteur.
+		local collectorMuseum = museumOf(env.collector) :: Model
+		local before = collectorMuseum.Exhibits:FindFirstChild("Exhibit1"):GetAttribute("SpecimenId")
+		local steal = request("SetExhibit", "MuseumResult", 5, 3, before)
+		expect(steal and not steal.ok and steal.reason == "NotOwned", "exemplaire d'un autre accepté")
+		request("MoveExhibit", "MuseumResult", 5, 1, 2)
+		request("SetMuseumStyle", "MuseumResult", 5, "theme", "lab")
+		task.wait(0.4)
+		expect(
+			collectorMuseum.Exhibits:FindFirstChild("Exhibit1"):GetAttribute("SpecimenId") == before,
+			"vitrine du collectionneur modifiée par un visiteur"
+		)
+		expect(
+			not string.find(tostring(collectorMuseum:GetAttribute("Styles")), "/lab", 1, true),
+			"styles du collectionneur modifiés par un visiteur"
+		)
+	end)
+
 	check("musee.retour_village", function()
 		releaseCamera()
 		local reply = travel("village")

@@ -897,6 +897,7 @@ function CollectionPanel.build(gui: ScreenGui, touch: boolean)
 	CollectionPanel.addTab("Inventory", "Inventaire", buildInventoryPage(), refreshInventory)
 	require(script.Parent.ObjectivesTab).register(CollectionPanel)
 	require(script.Parent.MuseumTab).register(CollectionPanel)
+	require(script.Parent.VisitsTab).register(CollectionPanel)
 
 	ui.close.Activated:Connect(function()
 		CollectionPanel.setOpen(false)
