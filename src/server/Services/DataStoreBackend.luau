@@ -46,8 +46,9 @@ end
 
 --[[
 	Retourne (backend, description). En Studio, vérifie d'abord que le DataStore répond ;
-	sinon bascule sur la mémoire. En jeu publié, une erreur au démarrage est passagère :
-	on garde le DataStore (les réessais de ProfileService s'en chargent).
+	sinon bascule sur la mémoire. En jeu publié : si le DataStore ne peut même pas être ouvert,
+	stockage « indisponible » (jamais de repli mémoire) ; une erreur passagère ensuite est
+	gérée par les réessais de ProfileService.
 ]]
 -- Stockage qui échoue toujours (même interface) : profils « Unavailable », rien n'est écrit.
 function DataStoreBackend.unavailable(reason: string): any

@@ -121,6 +121,9 @@ local MimicModelBuilder = require(Shared.Builders.MimicModelBuilder)
 local Remotes = require(Shared.Net.Remotes)
 local MapLayout = require(ServerRoot.Map.MapLayout)
 
+-- Mesures de performance relevées par la suite serveur (rapport : serverMetrics).
+local serverMetrics: { [string]: any } = {}
+
 -- Musées (V0.3) : service exposé par HuntServer en Studio.
 -- selene: allow(global_usage)
 local museum = (_G :: any).MimicMuseum
@@ -663,6 +666,43 @@ local function serverSuite()
 		expect(moved and moved:GetAttribute("SpecimenId") == string.format("S%d-1", M), "réorganisation non rendue")
 	end)
 
+	-- Coût réseau du rendu (V0.3.1, jalon 4) : nombre d'Instances (répliquées à tous les
+	-- clients) créées dans le musée par une action du propriétaire.
+	check("perf.rendu_incremental_musee", function()
+		local core = museum.core
+		local function created(action: () -> ()): number
+			local count = 0
+			local conn = mRefs.exhibits.DescendantAdded:Connect(function()
+				count += 1
+			end)
+			action()
+			task.wait(0.3)
+			conn:Disconnect()
+			return count
+		end
+		task.wait(0.5)
+		local style = created(function()
+			museum.run((core:setStyle(M, "wall", "mint", os.clock())))
+		end)
+		task.wait(0.5)
+		local one = created(function()
+			museum.run((core:setExhibit(M, 6, string.format("S%d-6", M), os.clock())))
+		end)
+		local perExhibit = #mRefs.exhibits:GetDescendants() / math.max(#exhibitModels(mRefs), 1)
+		log(
+			string.format(
+				"perf.rendu : style → %d Instances ; une vitrine → %d ; ≈ %d par vitrine",
+				style,
+				one,
+				perExhibit
+			)
+		)
+		serverMetrics.renderCost = { style = style, oneSlot = one, perExhibit = math.floor(perExhibit) }
+		-- Avant le rendu incrémental (mesuré le 31/10/2026) : style → 106, une vitrine → 115.
+		expect(style == 0, "un changement de couleur reconstruit " .. style .. " Instances")
+		expect(one <= perExhibit * 2, "une vitrine changée reconstruit " .. one .. " Instances")
+	end)
+
 	check("musee.sauvegarde_reconnexion_studio", function()
 		-- Vrai ProfileService du serveur : le musée survit à un départ puis un retour.
 		-- selene: allow(global_usage)
@@ -766,9 +806,14 @@ local bus = Instance.new("RemoteEvent")
 bus.Name = "MH_TestBus"
 bus.Parent = ReplicatedStorage
 local reports: { [number]: any } = {}
+-- Tâches ciblées de la session multijoueur (V0.3.1) : réponses des clients par identifiant.
+local mpReplies: { [number]: any } = {}
+local mpSeq = 0
 bus.OnServerEvent:Connect(function(player, kind, data)
 	if kind == "report" then
 		reports[player.UserId] = data
+	elseif kind == "mp_reply" and type(data) == "table" and type(data.id) == "number" then
+		mpReplies[data.id] = data.result or { error = "réponse vide" }
 	elseif kind == "prepare_museum" then
 		-- Collectionneur fictif avec 6 Mimics exposés (Chromatic et Spectral compris) à visiter.
 		local V = -5005
@@ -887,6 +932,35 @@ local function clientSuite()
 				error("le client n'a pas capturé (voir client.*)")
 			end
 		end)
+		-- Mesures de playtest (V0.3.1, jalon 7) : la session jouée par le client a bien été
+		-- suivie, étape par étape (rien n'est envoyé à AnalyticsService dans Studio).
+		check("analytics.parcours_du_client", function()
+			-- selene: allow(global_usage)
+			local analytics = (_G :: any).MimicAnalytics
+			expect(analytics ~= nil, "_G.MimicAnalytics absent")
+			local snap = analytics.snapshot(player.UserId)
+			expect(snap ~= nil, "aucune session suivie")
+			local seen = {}
+			for _, step in snap.firsts do
+				seen[step] = true
+			end
+			for _, step in
+				{
+					"Premier scan",
+					"Première capture",
+					"Codex ouvert",
+					"Base visitée",
+					"Premier Mimic exposé",
+					"Autre musée visité",
+				}
+			do
+				expect(seen[step], "étape non mesurée : " .. step)
+			end
+			expect(snap.captures >= 2, "captures comptées : " .. tostring(snap.captures))
+			expect(snap.huntsStarted >= 1 and snap.huntsCompleted >= 1, "Museum Hunt non comptée")
+			expect(analytics.sentCount() == 0, "envoi à AnalyticsService depuis Studio")
+			serverMetrics.analytics = snap
+		end)
 	end
 	return report and report.env
 end
@@ -909,6 +983,247 @@ local function multiplayerSuite()
 	if #players < 2 then
 		return
 	end
+
+	-- ─── Scénarios à deux vrais clients (V0.3.1, jalon 3) ─────────────────
+	-- Chaque client agit par les RemoteEvents du jeu (comme un joueur) et rapporte ce qu'il voit.
+	local A, B = players[1], players[2]
+	local core = museum and museum.core
+
+	local function ask(target: Player, name: string, taskArgs: any?, timeout: number?): any
+		mpSeq += 1
+		local id = mpSeq
+		bus:FireClient(target, "mp", { id = id, name = name, args = taskArgs })
+		return waitFor(function()
+			return mpReplies[id]
+		end, timeout or 20, 0.1)
+	end
+
+	-- Les deux clients écoutent le bus avant de commencer.
+	check("multi.clients_prets", function()
+		for _, p in { A, B } do
+			local ready = waitFor(function()
+				mpSeq += 1
+				local id = mpSeq
+				bus:FireClient(p, "mp", { id = id, name = "ping" })
+				task.wait(0.5)
+				return mpReplies[id]
+			end, 30, 0.1)
+			expect(ready and ready.ok, "client " .. p.Name .. " muet")
+		end
+	end)
+
+	check("multi.parcelles_distinctes", function()
+		expect(core ~= nil, "_G.MimicMuseum absent")
+		local plotA, plotB = core:plotOf(A.UserId), core:plotOf(B.UserId)
+		expect(plotA and plotB and plotA ~= plotB, string.format("parcelles %s / %s", tostring(plotA), tostring(plotB)))
+		-- Chaque client connaît SA parcelle (reçue par le réseau).
+		local stateA, stateB = ask(A, "state"), ask(B, "state")
+		expect(stateA and stateA.plot == plotA, "A ne voit pas sa parcelle : " .. tostring(stateA and stateA.plot))
+		expect(stateB and stateB.plot == plotB, "B ne voit pas sa parcelle : " .. tostring(stateB and stateB.plot))
+	end)
+
+	-- A reçoit 3 exemplaires (dont Chromatic et Spectral) exposés dans ses vitrines 1 à 3 ;
+	-- B en reçoit un. Accordés par le serveur, comme une capture.
+	local granted: { [number]: { string } } = {}
+	local function give(p: Player, list: { { string } })
+		local collection = world:inventoryOf(p.UserId)
+		granted[p.UserId] = {}
+		for i, spec in list do
+			local ok, result = collection:grant(
+				string.format("mp-%d-%d", p.UserId, i),
+				spec[1],
+				MimicCatalog.get(spec[1]).rarity,
+				spec[2],
+				7000 + i * 13
+			)
+			expect(ok, "attribution refusée : " .. tostring(result))
+			table.insert(granted[p.UserId], result.specimen.id)
+		end
+		-- Envoi au client par le chemin normal du jeu (instantané de collection à ce seul joueur).
+		museum.run((world:clientReady(p.UserId, os.clock())))
+	end
+	check("multi.exposition_par_le_reseau", function()
+		give(A, { { "chairy", "Standard" }, { "lumino", "Chromatic" }, { "posty", "Spectral" } })
+		give(B, { { "vendoo", "Standard" } })
+		-- Le propriétaire expose lui-même, depuis son client (RemoteEvent SetExhibit).
+		for slot = 1, 3 do
+			local reply = ask(A, "setExhibit", { slot = slot, id = granted[A.UserId][slot] })
+			expect(reply and reply.ok, "exposition refusée : " .. tostring(reply and reply.reason))
+		end
+		local own = ask(B, "setExhibit", { slot = 1, id = granted[B.UserId][1] })
+		expect(own and own.ok, "exposition de B refusée : " .. tostring(own and own.reason))
+	end)
+
+	check("multi.visites_croisees", function()
+		local toA = ask(B, "travel", { kind = "museum", target = A.UserId })
+		expect(toA and toA.ok and toA.plot == core:plotOf(A.UserId), "B ne peut pas visiter A")
+		local toB = ask(A, "travel", { kind = "museum", target = B.UserId })
+		expect(toB and toB.ok and toB.plot == core:plotOf(B.UserId), "A ne peut pas visiter B")
+		ask(A, "travel", { kind = "base" })
+	end)
+
+	check("multi.mutations_identiques_pour_tous", function()
+		local seenA = ask(A, "exhibits", { owner = A.UserId })
+		local seenB = ask(B, "exhibits", { owner = A.UserId })
+		expect(seenA and seenB, "pas de réponse")
+		expect(
+			#seenA.list == 3 and #seenB.list == 3,
+			string.format("vitrines vues : A %d, B %d", #seenA.list, #seenB.list)
+		)
+		for i = 1, 3 do
+			local a, b = seenA.list[i], seenB.list[i]
+			expect(a.specimenId == b.specimenId, "exemplaire différent en vitrine " .. i)
+			expect(
+				a.mutation == b.mutation and a.seed == b.seed and a.parts == b.parts,
+				"apparence différente en vitrine " .. i
+			)
+			local specimen = world:inventoryOf(A.UserId):specimen(a.specimenId)
+			expect(specimen and specimen.mutation == a.mutation, "mutation vue ≠ mutation du profil")
+		end
+		expect(
+			seenB.list[2].mutation == "Chromatic" and seenB.list[3].mutation == "Spectral",
+			"mutations rares absentes"
+		)
+	end)
+
+	check("multi.mise_a_jour_vue_par_le_visiteur", function()
+		-- B regarde le musée de A ; A remplace la vitrine 1 par son exemplaire Spectral… impossible
+		-- (déjà exposé) : il vide la vitrine 3 puis y place autre chose. Ici : échange 1 ↔ 3.
+		local watcher = nil
+		task.spawn(function()
+			watcher = ask(B, "waitExhibit", { owner = A.UserId, slot = 1, id = granted[A.UserId][3], timeout = 12 }, 20)
+		end)
+		task.wait(0.5)
+		local moved = ask(A, "moveExhibit", { from = 1, to = 3 })
+		expect(moved and moved.ok, "déplacement refusé : " .. tostring(moved and moved.reason))
+		waitFor(function()
+			return watcher
+		end, 20)
+		expect(watcher and watcher.ok, "le visiteur n'a pas vu la mise à jour")
+	end)
+
+	check("multi.visiteur_ne_modifie_rien", function()
+		local before = table.clone(world:getProfile(A.UserId).museum.slots)
+		-- Requêtes forgées : les vitrines et styles d'un joueur portent toujours sur SA collection.
+		local forged = ask(B, "setExhibit", { slot = 1, id = granted[A.UserId][2] })
+		expect(
+			forged and not forged.ok and forged.reason == "NotOwned",
+			"requête forgée : " .. tostring(forged and forged.reason)
+		)
+		ask(B, "setStyle", { kind = "wall", id = "night" })
+		local after = world:getProfile(A.UserId).museum.slots
+		for slot = 1, 6 do
+			expect(after[slot] == before[slot], "vitrine " .. slot .. " de A modifiée par B")
+		end
+		expect(world:getProfile(A.UserId).museum.wall ~= "night" or before.wall == "night", "style de A modifié")
+	end)
+
+	check("multi.collections_privees", function()
+		for _, pair in { { A, B }, { B, A } } do
+			local me, other = pair[1], pair[2]
+			local state = ask(me, "state")
+			expect(state and #state.ids > 0, "collection absente côté client")
+			for _, id in state.ids do
+				expect(
+					string.find(id, "S" .. me.UserId .. "-", 1, true) == 1,
+					me.Name .. " a reçu un exemplaire étranger : " .. id
+				)
+				expect(not table.find(granted[other.UserId], id), me.Name .. " a reçu un exemplaire de " .. other.Name)
+			end
+		end
+	end)
+
+	check("multi.meme_mimic_deux_joueurs", function()
+		local record = findHidden()
+		expect(record, "aucun Mimic caché")
+		local position = slotPosition(record.slotId)
+		for i, p in { A, B } do
+			local root = p.Character and p.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+			expect(root, "personnage absent")
+			root.CFrame = CFrame.new(position + Vector3.new(i * 1.5, 2, 0))
+		end
+		task.wait(0.8)
+		local raced = {}
+		for _, p in { A, B } do
+			task.spawn(function()
+				raced[p.UserId] = ask(p, "race", { propId = record.slotId }, 15)
+			end)
+		end
+		waitFor(function()
+			return raced[A.UserId] and raced[B.UserId]
+		end, 20)
+		local winners = 0
+		for _, p in { A, B } do
+			local r = raced[p.UserId]
+			expect(r, p.Name .. " sans réponse")
+			if r.started then
+				winners += 1
+			end
+		end
+		expect(winners == 1, "captures lancées sur le même Mimic : " .. winners)
+		-- La tentative du gagnant expire (aucune impulsion envoyée) avant la suite.
+		waitFor(function()
+			return not world:isCapturing(A.UserId) and not world:isCapturing(B.UserId)
+		end, 20)
+	end)
+
+	check("multi.defi_concurrent_meme_musee", function()
+		-- Musée d'un collectionneur fictif : A et B y lancent la Museum Hunt en même temps.
+		local V = -5006
+		if world:inventoryOf(V) == nil then
+			world:addPlayer(V, os.clock(), collectorProfile(V))
+			museum.onPlayerReady(V)
+		end
+		for _, p in { A, B } do
+			local reply = ask(p, "travel", { kind = "museum", target = V })
+			expect(reply and reply.ok, p.Name .. " ne peut pas aller au musée")
+		end
+		task.wait(0.8)
+		local replies = {}
+		for _, p in { A, B } do
+			task.spawn(function()
+				replies[p.UserId] = ask(p, "startHunt", { owner = V })
+			end)
+		end
+		waitFor(function()
+			return replies[A.UserId] and replies[B.UserId]
+		end, 20)
+		local started, busy = 0, 0
+		for _, p in { A, B } do
+			local r = replies[p.UserId]
+			if r and r.ok then
+				started += 1
+			elseif r and r.reason == "Busy" then
+				busy += 1
+			end
+		end
+		expect(started == 1 and busy == 1, string.format("défis lancés %d, refus « occupé » %d", started, busy))
+		-- On libère le musée fictif pour la suite.
+		for _, p in { A, B } do
+			if core:huntOf(p.UserId) then
+				ask(p, "travel", { kind = "village" })
+			end
+		end
+		waitFor(function()
+			return core:huntOf(A.UserId) == nil and core:huntOf(B.UserId) == nil
+		end, 5)
+	end)
+
+	-- A lance un défi chez B, puis B quitte la partie : le défi de A doit être annulé.
+	check("multi.defi_chez_un_joueur", function()
+		local reply = ask(A, "travel", { kind = "museum", target = B.UserId })
+		expect(reply and reply.ok, "A ne peut pas aller chez B")
+		task.wait(0.8)
+		local started = ask(A, "startHunt", { owner = B.UserId })
+		-- Si A a gagné le défi concurrent puis quitté le jardin, le délai entre deux défis
+		-- s'applique (correctif de l'audit) : on l'attend, puis on relance.
+		if started and started.reason == "Cooldown" then
+			task.wait((started.remaining or 20) + 0.5)
+			started = ask(A, "startHunt", { owner = B.UserId })
+		end
+		expect(started and started.ok, "défi chez B refusé : " .. tostring(started and started.reason))
+	end)
+
 	local leaver = players[2]
 	local leaverId = leaver.UserId
 	check("multi.deconnexion_LeaveTest", function()
@@ -934,6 +1249,17 @@ local function multiplayerSuite()
 		)
 		expect(world:inventoryOf(players[1].UserId) ~= nil, "l'autre joueur a été affecté")
 	end)
+	check("multi.defi_annule_au_depart_du_proprietaire", function()
+		local hunts = ask(A, "huntLog")
+		local cancelled = false
+		for _, entry in hunts and hunts.entries or {} do
+			if entry.phase == "cancel" and entry.reason == "OwnerLeft" then
+				cancelled = true
+			end
+		end
+		expect(cancelled, "A n'a pas été prévenu de l'annulation (propriétaire parti)")
+		expect(core:huntOf(A.UserId) == nil, "défi encore actif après le départ du propriétaire")
+	end)
 	check("multi.reconnexion_AddPlayers", function()
 		local before = #Players:GetPlayers()
 		StudioTestService:AddPlayers(1)
@@ -952,6 +1278,33 @@ local function multiplayerSuite()
 			)
 		end
 	end)
+	check("multi.parcelle_reattribuee_proprement", function()
+		local newcomer = nil
+		for _, p in Players:GetPlayers() do
+			if p ~= A then
+				newcomer = p
+			end
+		end
+		expect(newcomer, "aucun nouveau joueur")
+		local plot = waitFor(function()
+			return core:plotOf(newcomer.UserId)
+		end, 10)
+		expect(plot, "pas de parcelle pour le nouveau joueur")
+		-- Plus aucun objet du joueur parti, nulle part dans le quartier.
+		for _, model in CollectionService:GetTagged("MuseumExhibit") do
+			expect(model:GetAttribute("OwnerUserId") ~= leaverId, "exposé du joueur parti encore présent")
+		end
+		local refs = museum.plots[plot]
+		local label = refs and refs.nameLabel
+		expect(label and string.find(label.Text, leaver.Name, 1, true) == nil, "nom du joueur parti encore affiché")
+		local occupied = 0
+		for _, child in refs.exhibits:GetChildren() do
+			if child:IsA("Model") and child:GetAttribute("Exhibit") then
+				occupied += 1
+			end
+		end
+		expect(occupied == 0, "le nouveau musée (profil vide) montre " .. occupied .. " Mimic(s)")
+	end)
 end
 
 local env
@@ -966,4 +1319,4 @@ else
 		error("suite inconnue : " .. tostring(suite))
 	end)
 end
-finish({ clientEnv = env })
+finish({ clientEnv = env, serverMetrics = serverMetrics })

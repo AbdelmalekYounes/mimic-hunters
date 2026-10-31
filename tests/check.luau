@@ -28,7 +28,13 @@ local function walk(dir: string)
 	end
 end
 
--- Dossier à vérifier : src par défaut, ou celui passé en argument.
-walk(process.args[1] or "src")
+-- Dossiers à vérifier : src par défaut, ou ceux passés en arguments.
+if #process.args == 0 then
+	walk("src")
+else
+	for _, dir in process.args do
+		walk(dir)
+	end
+end
 print(string.format("%d fichier(s) compilé(s), %d erreur(s)", checked, failed))
 process.exit(if failed == 0 then 0 else 1)

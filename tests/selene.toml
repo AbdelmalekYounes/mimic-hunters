@@ -1,3 +1,4 @@
 std = "luau"
-# Les suites Studio utilisent l API Roblox : elles sont lintées avec la config racine.
-exclude = ["studio/*"]
+# Les suites Studio et le lanceur du contrôle DataStore utilisent l API Roblox : ils sont
+# lintés avec la config racine (étape « Selene : suites Studio »).
+exclude = ["studio/*", "datastore/*.server.luau"]

@@ -675,6 +675,27 @@ local function runTests(payload: any)
 		viewCamera.CameraType = Enum.CameraType.Custom
 	end
 
+	-- Guide de première session (V0.3.1, jalon 6) : après la première capture et l'ouverture de
+	-- la collection, sans Mimic exposé, il conduit vers MA BASE.
+	check("ux.guide_vers_le_musee", function()
+		local GuideController = require(clientRoot.Controllers.GuideController) :: any
+		CollectionPanel.setOpen(false)
+		local state = nil
+		local deadline = os.clock() + 12
+		repeat
+			task.wait(0.5)
+			state = GuideController.state()
+		until (state.current and string.find(state.current, "MA BASE", 1, true)) or os.clock() > deadline
+		expect(state.openedCollection, "ouverture de la collection non vue par le guide")
+		expect(state.exhibited == 0, "pré-requis : aucun Mimic exposé")
+		expect(
+			state.current and string.find(state.current, "MA BASE", 1, true),
+			"consigne du guide : " .. tostring(state.current)
+		)
+		local banner = hud and hud:FindFirstChild("Banner") :: Frame
+		expect(banner and banner.Visible, "bandeau du guide masqué")
+	end)
+
 	check("musee.ma_base", function()
 		local deadline = os.clock() + 5
 		while ClientState.museumPlot == nil and os.clock() < deadline do
@@ -959,9 +980,13 @@ local function runTests(payload: any)
 			-- Le serveur doit avoir reçu la nouvelle position du personnage (réplication).
 			task.wait(0.6)
 			local reply = request("RequestInspect", "InspectResult", 5, prop.id)
-			if reply and not reply.ok and reply.reason == "OutOfRange" then
-				task.wait(0.8)
-				reply = request("RequestInspect", "InspectResult", 5, prop.id)
+			-- Réplication de la position, ou attente après un raté (2,5 s depuis la V0.3.1) :
+			-- on patiente puis on réessaie.
+			for _ = 1, 2 do
+				if reply and not reply.ok and (reply.reason == "OutOfRange" or reply.reason == "Cooldown") then
+					task.wait(if reply.reason == "Cooldown" then GameConfig.MuseumHunt.MissCooldown else 0.8)
+					reply = request("RequestInspect", "InspectResult", 5, prop.id)
+				end
 			end
 			expect(reply and reply.ok, "examen refusé : " .. tostring(reply and reply.reason))
 			if reply.result == "HuntFound" then
@@ -997,6 +1022,39 @@ local function runTests(payload: any)
 		local again = waitPhase("refused", 3)
 		conn:Disconnect()
 		expect(again and again.reason == "Cooldown", "rejouer immédiatement : " .. tostring(again and again.reason))
+	end)
+
+	-- Coût de l'ouverture du panneau Collection (V0.3.1, jalon 4) : Instances créées dans
+	-- l'interface pendant l'ouverture sur l'Inventaire, et requêtes envoyées par l'onglet Visites.
+	check("perf.ouverture_collection", function()
+		releaseCamera()
+		CollectionPanel.setOpen(false)
+		task.wait(0.3)
+		local gui = (CollectionPanel.page() :: any).panel:FindFirstAncestorWhichIsA("ScreenGui")
+		local created = 0
+		local conn = gui.DescendantAdded:Connect(function()
+			created += 1
+		end)
+		CollectionPanel.showTab("Inventory")
+		CollectionPanel.setOpen(true)
+		task.wait(0.6)
+		conn:Disconnect()
+		CollectionPanel.setOpen(false)
+		task.wait(0.3)
+		local lists = 0
+		local listConn = remote("MuseumList").OnClientEvent:Connect(function()
+			lists += 1
+		end)
+		CollectionPanel.setOpen(true)
+		CollectionPanel.showTab("Visits")
+		task.wait(1.5)
+		listConn:Disconnect()
+		CollectionPanel.setOpen(false)
+		env.panelCost = { instances = created, museumLists = lists, specimens = #ClientState.specimens }
+		expect(created > 0, "aucune Instance créée : mesure invalide")
+		-- Avant (mesuré le 31/10/2026, 2 Mimics) : ≈ 800 Instances et 10 requêtes Visites.
+		expect(created < 400, "ouverture du panneau : " .. created .. " Instances créées")
+		expect(lists <= 2, "onglet Visites : " .. lists .. " requêtes")
 	end)
 
 	check("perf.budget_musees", function()
@@ -1065,6 +1123,162 @@ local function runTests(payload: any)
 
 	bus:FireServer("report", { results = results, env = env, capturedSpecies = capturedSpecies })
 end
+
+-- ─── Tâches de la session multijoueur (V0.3.1, jalon 3) ─────────────────
+-- Le serveur de test envoie une tâche ciblée ; le client agit par les RemoteEvents du jeu
+-- (comme un joueur) et renvoie ce qu'il observe. Aucune souris ni aucun clavier simulés.
+local CollectionServiceMp = game:GetService("CollectionService")
+local huntLog = {}
+remote("HuntUpdate").OnClientEvent:Connect(function(p)
+	table.insert(huntLog, { phase = p.phase, reason = p.reason, ok = p.ok })
+end)
+
+local function clientState(): any
+	local root = player:WaitForChild("PlayerScripts"):WaitForChild("Client", 10)
+	return root and require(root.ClientState) :: any
+end
+
+-- Réponse MuseumResult d'une action donnée (les autres réponses sont ignorées).
+local function museumAction(action: string, send: () -> (), timeout: number?): any
+	local reply = nil
+	local conn = remote("MuseumResult").OnClientEvent:Connect(function(p)
+		if p.action == action then
+			reply = p
+		end
+	end)
+	send()
+	local deadline = os.clock() + (timeout or 6)
+	while reply == nil and os.clock() < deadline do
+		task.wait()
+	end
+	conn:Disconnect()
+	return reply
+end
+
+-- Exposés d'un musée tels que CE client les voit (modèles répliqués), triés par vitrine.
+local function exhibitsOf(owner: number): { any }
+	local list = {}
+	for _, model in CollectionServiceMp:GetTagged("MuseumExhibit") do
+		if model:GetAttribute("OwnerUserId") == owner then
+			local parts = 0
+			for _, d in model:GetDescendants() do
+				if d:IsA("BasePart") then
+					parts += 1
+				end
+			end
+			table.insert(list, {
+				slot = model:GetAttribute("Slot"),
+				specimenId = model:GetAttribute("SpecimenId"),
+				speciesId = model:GetAttribute("SpeciesId"),
+				mutation = model:GetAttribute("Mutation"),
+				seed = model:GetAttribute("Seed"),
+				parts = parts,
+			})
+		end
+	end
+	table.sort(list, function(a, b)
+		return (a.slot or 0) < (b.slot or 0)
+	end)
+	return list
+end
+
+local mpTasks = {}
+function mpTasks.ping(): any
+	return { ok = true }
+end
+function mpTasks.state(): any
+	local state = clientState()
+	local ids = {}
+	for _, specimen in state.specimens do
+		table.insert(ids, specimen.id)
+	end
+	return { plot = state.museumPlot, ids = ids }
+end
+function mpTasks.travel(args: any): any
+	local reply = museumAction("travel", function()
+		remote("RequestTravel"):FireServer(args.kind, args.target)
+	end, 8)
+	task.wait(0.6) -- le temps que la téléportation se réplique
+	return reply or { ok = false, reason = "NoReply" }
+end
+function mpTasks.setExhibit(args: any): any
+	return museumAction("exhibit", function()
+		remote("SetExhibit"):FireServer(args.slot, args.id)
+	end) or { ok = false, reason = "NoReply" }
+end
+function mpTasks.moveExhibit(args: any): any
+	return museumAction("move", function()
+		remote("MoveExhibit"):FireServer(args.from, args.to)
+	end) or { ok = false, reason = "NoReply" }
+end
+function mpTasks.setStyle(args: any): any
+	return museumAction("style", function()
+		remote("SetMuseumStyle"):FireServer(args.kind, args.id)
+	end) or { ok = false, reason = "NoReply" }
+end
+function mpTasks.exhibits(args: any): any
+	-- Laisse aux modèles le temps d'arriver (réplication).
+	local deadline = os.clock() + 5
+	local list = exhibitsOf(args.owner)
+	while #list == 0 and os.clock() < deadline do
+		task.wait(0.2)
+		list = exhibitsOf(args.owner)
+	end
+	return { list = list }
+end
+function mpTasks.waitExhibit(args: any): any
+	local started = os.clock()
+	while os.clock() - started < (args.timeout or 10) do
+		for _, e in exhibitsOf(args.owner) do
+			if e.slot == args.slot and e.specimenId == args.id then
+				return { ok = true, after = os.clock() - started }
+			end
+		end
+		task.wait(0.1)
+	end
+	return { ok = false }
+end
+function mpTasks.race(args: any): any
+	local inspect = request("RequestInspect", "InspectResult", 5, args.propId)
+	if not (inspect and inspect.ok and inspect.result == "Mimic") then
+		return { started = false, inspect = inspect and (inspect.result or inspect.reason) }
+	end
+	local started = request("RequestCapture", "CaptureStarted", 5, inspect.mimicId)
+	return { started = started ~= nil and started.ok == true, reason = started and started.reason }
+end
+function mpTasks.startHunt(args: any): any
+	local reply = nil
+	local conn = remote("HuntUpdate").OnClientEvent:Connect(function(p)
+		if p.phase == "start" or p.phase == "refused" then
+			reply = p
+		end
+	end)
+	remote("StartMuseumHunt"):FireServer(args.owner)
+	local deadline = os.clock() + 6
+	while reply == nil and os.clock() < deadline do
+		task.wait()
+	end
+	conn:Disconnect()
+	return reply or { ok = false, reason = "NoReply" }
+end
+function mpTasks.huntLog(): any
+	return { entries = huntLog }
+end
+
+bus.OnClientEvent:Connect(function(kind, payload)
+	if kind == "mp" and type(payload) == "table" then
+		task.spawn(function()
+			local fn = mpTasks[payload.name]
+			local ok, result = pcall(function()
+				return if fn then fn(payload.args) else { error = "tâche inconnue" }
+			end)
+			bus:FireServer(
+				"mp_reply",
+				{ id = payload.id, result = if ok then result else { error = tostring(result) } }
+			)
+		end)
+	end
+end)
 
 bus.OnClientEvent:Connect(function(kind, payload)
 	if kind == "run" and not running then

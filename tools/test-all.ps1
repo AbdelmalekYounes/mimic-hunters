@@ -87,8 +87,8 @@ Add-Step "Lune : syntaxe" "CLI" "lune" "run tests/check" $Root { param($o) Last-
 Add-Step "Lune : tests logique pure" "CLI" "lune" "run tests/run" $Root { param($o) Last-Line $o "\d+ réussi\(s\), \d+ échoué\(s\), \d+ au total" }
 Add-Step "Selene : src" "CLI" "selene" "src" $Root { param($o) (Last-Line $o "\d+ errors") + " / " + (Last-Line $o "\d+ warnings") }
 Add-Step "Selene : tests" "CLI" "selene" "." (Join-Path $Root "tests") { param($o) (Last-Line $o "\d+ errors") + " / " + (Last-Line $o "\d+ warnings") }
-Add-Step "Selene : suites Studio" "CLI" "selene" "tests/studio" $Root { param($o) (Last-Line $o "\d+ errors") + " / " + (Last-Line $o "\d+ warnings") }
-Add-Step "Lune : syntaxe suites Studio" "CLI" "lune" "run tests/check tests/studio" $Root { param($o) Last-Line $o "\d+ fichier\(s\) compilé\(s\), \d+ erreur\(s\)" }
+Add-Step "Selene : suites Studio" "CLI" "selene" "tests/studio tests/datastore" $Root { param($o) (Last-Line $o "\d+ errors") + " / " + (Last-Line $o "\d+ warnings") }
+Add-Step "Lune : syntaxe suites Studio" "CLI" "lune" "run tests/check tests/studio tests/datastore" $Root { param($o) Last-Line $o "\d+ fichier\(s\) compilé\(s\), \d+ erreur\(s\)" }
 Add-Step "Luau : analyse de types" "CLI" "powershell" "-NoProfile -ExecutionPolicy Bypass -File tools/luau-analyze.ps1" $Root { param($o) Last-Line $o "\d+ erreur\(s\) de type" }
 Add-Step "StyLua : formatage" "CLI" "stylua" "--check src tests" $Root { param($o) if ($o.Trim()) { "écarts de formatage" } else { "conforme" } }
 Add-Step "Rojo : construction" "CLI" "rojo" "build default.project.json -o build/MimicHunters.rbxl" $Root { param($o) Last-Line $o "Built project to .*" }
