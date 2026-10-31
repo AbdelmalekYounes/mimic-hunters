@@ -250,3 +250,114 @@ describe("Persistance — bout en bout", function()
 		expect(stored.schemaVersion).toBe(ProfileSchema.Version)
 	end)
 end)
+
+describe("Persistance — musées", function()
+	local MuseumCore = Loader.server("Core/MuseumCore")
+	local MuseumLayout = Loader.server("Map/MuseumLayout")
+
+	local function withMuseum(srv)
+		srv.museum = MuseumCore.new({ world = srv.world, layout = MuseumLayout, config = Fixtures.config() })
+		return srv
+	end
+
+	it("retrouve vitrines et styles après reconnexion sur un autre serveur", function()
+		local backend, env = MemoryBackend.new(), environment()
+		local one = withMuseum(server(backend, env, "job1", 50))
+		join(one, A)
+		one.museum:join(A, 0)
+		local ids = {}
+		for i = 1, 3 do
+			local result = capture(one, A, i * 10)
+			table.insert(ids, result.specimen.id)
+		end
+		one.museum:setExhibit(A, 1, ids[3], 40)
+		one.museum:setExhibit(A, 4, ids[1], 41)
+		one.museum:moveExhibit(A, 4, 6, 42)
+		one.museum:setStyle(A, "lighting", "aurora", 43)
+		one.museum:leave(A, 44)
+		expect(leave(one, A)).toBe(true)
+
+		local two = withMuseum(server(backend, env, "job2", 51))
+		join(two, A)
+		local events = two.museum:join(A, 0)
+		local render = Fixtures.named(events, "_MuseumRender")[1].payload
+		expect(render.slots[1].id).toBe(ids[3])
+		expect(render.slots[6].id).toBe(ids[1])
+		expect(render.slots[4]).toBe(false)
+		expect(render.styles.lighting).toBe("aurora")
+		expect(render.slots[1].seed).toBe(two.world:inventoryOf(A):specimen(ids[3]).seed)
+		-- Toujours le même nombre d'exemplaires : exposer n'en crée aucun.
+		expect(two.world:inventoryOf(A):owned()).toBe(3)
+	end)
+
+	it("sauvegarde rapidement un changement de vitrine", function()
+		local backend, env = MemoryBackend.new(), environment()
+		local one = withMuseum(server(backend, env, "job1", 52))
+		join(one, A)
+		one.museum:join(A, 0)
+		local result = capture(one, A, 10)
+		env.t += 8
+		one.profiles:step(function(userId)
+			return one.world:getProfile(userId)
+		end)
+		local events = one.museum:setExhibit(A, 2, result.specimen.id, 20)
+		forward(one, events)
+		env.t += 8
+		one.profiles:step(function(userId)
+			return one.world:getProfile(userId)
+		end)
+		expect(backend:peek("player_" .. A).data.museum.slots[2]).toBe(result.specimen.id)
+	end)
+
+	it("empêche un second serveur de modifier le musée pendant la session", function()
+		local backend, env = MemoryBackend.new(), environment()
+		local one = withMuseum(server(backend, env, "job1", 53))
+		local two = withMuseum(server(backend, env, "job2", 54))
+		join(one, A)
+		one.museum:join(A, 0)
+		local result = capture(one, A, 10)
+		expect(join(two, A)).toBe("Locked")
+		two.museum:join(A, 0)
+		local _, reply = two.museum:setExhibit(A, 1, result.specimen.id, 20)
+		expect(reply.ok).toBe(false)
+		expect(reply.reason).toBe("ProfileUnavailable")
+		expect(two.world:getProfile(A)).toBeNil()
+	end)
+
+	it("migre un profil V0.2 stocké sans perdre aucun Mimic", function()
+		local backend, env = MemoryBackend.new(), environment()
+		local v2 = ProfileSchema.new(0)
+		v2.schemaVersion = 2
+		v2.museum = nil
+		v2.hunts = nil
+		v2.tutorialDone = true
+		for i = 1, 4 do
+			local id = ProfileSchema.specimenId(A, i)
+			v2.specimens[id] = {
+				id = id,
+				speciesId = "vendoo",
+				rarity = "Epic",
+				mutation = if i == 2 then "Spectral" else "Standard",
+				seed = i,
+				acquiredAt = i,
+				favorite = false,
+			}
+		end
+		v2.nextSerial = 5
+		backend:poke("player_" .. A, { data = v2, meta = {} })
+		local one = withMuseum(server(backend, env, "job1", 55))
+		join(one, A)
+		expect(one.world:inventoryOf(A):owned()).toBe(4)
+		local _, reply = one.museum:setExhibit(A, 1, ProfileSchema.specimenId(A, 2), 1)
+		expect(reply.ok).toBe(true)
+		leave(one, A)
+		local stored = backend:peek("player_" .. A).data
+		expect(stored.schemaVersion).toBe(3)
+		local count = 0
+		for _ in stored.specimens do
+			count += 1
+		end
+		expect(count).toBe(4)
+		expect(stored.museum.slots[1]).toBe(ProfileSchema.specimenId(A, 2))
+	end)
+end)

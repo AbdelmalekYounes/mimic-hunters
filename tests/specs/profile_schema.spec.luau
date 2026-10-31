@@ -117,3 +117,104 @@ describe("ProfileSchema", function()
 		expect(ProfileSchema.specimenId(12, 3) ~= ProfileSchema.specimenId(1, 23)).toBe(true)
 	end)
 end)
+
+describe("ProfileSchema — migration v2 → v3 (musée)", function()
+	-- Profil V0.2 réel : exemplaires, objectifs, cosmétiques, réglages, statistiques.
+	local function v2Profile()
+		return {
+			schemaVersion = 2,
+			createdAt = 10,
+			updatedAt = 20,
+			nextSerial = 4,
+			specimens = {
+				["S4242-1"] = {
+					id = "S4242-1",
+					speciesId = "chairy",
+					rarity = "Common",
+					mutation = "Standard",
+					seed = 11,
+					acquiredAt = 1,
+					favorite = true,
+				},
+				["S4242-2"] = {
+					id = "S4242-2",
+					speciesId = "lumino",
+					rarity = "Uncommon",
+					mutation = "Chromatic",
+					seed = 22,
+					acquiredAt = 2,
+					favorite = false,
+				},
+				["S4242-3"] = {
+					id = "S4242-3",
+					speciesId = "posty",
+					rarity = "Uncommon",
+					mutation = "Spectral",
+					seed = 33,
+					acquiredAt = 3,
+					favorite = false,
+				},
+			},
+			codex = { chairy = { discoveredAt = 1, order = 1, captured = 1, mutations = { Standard = true } } },
+			grants = { ["job:A1"] = "S4242-1" },
+			grantOrder = { "job:A1" },
+			objectives = { first_capture = 5 },
+			cosmetics = {
+				title = "title_apprentice",
+				scannerColor = "color_mint",
+				unlocked = { title_apprentice = true, color_mint = true },
+			},
+			settings = { sfx = false, reducedEffects = true },
+			stats = { totalCaptures = 3, mutations = { Standard = 1, Chromatic = 1, Spectral = 1 } },
+			tutorialDone = true,
+		}
+	end
+
+	it("ajoute un musée vide sans toucher aux exemplaires ni au reste du profil", function()
+		local before = v2Profile()
+		local profile = ProfileSchema.migrate(ProfileSchema.deepCopy(before), context(9999))
+		expect(profile.schemaVersion).toBe(3)
+		expect(profile.specimens).toEqual(before.specimens)
+		expect(profile.nextSerial).toBe(4)
+		expect(profile.objectives).toEqual(before.objectives)
+		expect(profile.cosmetics.title).toBe("title_apprentice")
+		expect(profile.cosmetics.scannerColor).toBe("color_mint")
+		expect(profile.settings.sfx).toBe(false)
+		expect(profile.stats).toEqual(before.stats)
+		expect(profile.grants["job:A1"]).toBe("S4242-1")
+		expect(#profile.museum.slots).toBe(ProfileSchema.MuseumSlots)
+		for _, id in profile.museum.slots do
+			expect(id).toBe("")
+		end
+		expect(profile.museum.wall).toBe("lilac")
+		expect(profile.hunts.best).toBe(0)
+	end)
+
+	it("vide les vitrines invalides ou en double, sans perdre l'exemplaire", function()
+		local data = v2Profile()
+		data.schemaVersion = 3
+		data.museum = {
+			slots = { "S4242-2", "S9999-1", "S4242-2", 42, "S4242-3", "" },
+			wall = "night",
+			lighting = 7,
+			pedestal = "inconnu",
+			theme = "lab",
+		}
+		data.hunts = {
+			played = 3,
+			completed = 1,
+			best = 250,
+			museums = { ["12"] = 5, ["13"] = "x" },
+			museumOrder = { "12", "13" },
+		}
+		local profile, dropped = ProfileSchema.sanitize(data, context())
+		expect(profile.museum.slots).toEqual({ "S4242-2", "", "", "", "S4242-3", "" })
+		expect(dropped).toBeAtLeast(2)
+		expect(profile.specimens["S4242-2"] ~= nil).toBe(true)
+		expect(profile.museum.wall).toBe("night")
+		expect(profile.museum.lighting).toBe("dusk") -- type invalide → défaut
+		expect(profile.museum.pedestal).toBe("inconnu") -- gardé ; le rendu retombe sur le défaut
+		expect(profile.hunts.best).toBe(250)
+		expect(profile.hunts.museumOrder).toEqual({ "12" })
+	end)
+end)

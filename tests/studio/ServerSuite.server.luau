@@ -662,6 +662,43 @@ local function serverSuite()
 		expect(moved and moved:GetAttribute("SpecimenId") == string.format("S%d-1", M), "réorganisation non rendue")
 	end)
 
+	check("musee.sauvegarde_reconnexion_studio", function()
+		-- Vrai ProfileService du serveur : le musée survit à un départ puis un retour.
+		-- selene: allow(global_usage)
+		local service = (_G :: any).MimicProfiles.service
+		local R = -6006
+		local status = service:load(R)
+		expect(status == "Ready", "chargement : " .. tostring(status))
+		world:addPlayer(R, os.clock(), collectorProfile(R))
+		museum.onPlayerReady(R)
+		task.wait(0.3)
+		museum.run((museum.core:moveExhibit(R, 2, 5, os.clock())))
+		task.wait(0.3)
+		museum.run((museum.core:setStyle(R, "theme", "fair", os.clock())))
+		local saved = world:getProfile(R)
+		museum.onPlayerRemoving(R)
+		world:removePlayer(R, os.clock())
+		expect(service:release(R, saved), "sauvegarde finale échouée")
+		local again, data = service:load(R)
+		expect(again == "Ready", "rechargement : " .. tostring(again))
+		world:addPlayer(R, os.clock(), data)
+		museum.onPlayerReady(R)
+		local refs = museum.plots[museum.core:plotOf(R)]
+		local five = refs.exhibits:FindFirstChild("Exhibit5")
+		expect(five and five:GetAttribute("SpecimenId") == string.format("S%d-2", R), "vitrine 5 après reconnexion")
+		expect(five:GetAttribute("Mutation") == "Chromatic", "mutation perdue après reconnexion")
+		expect(
+			refs.exhibits:FindFirstChild("Exhibit2")
+				and refs.exhibits.Exhibit2:GetAttribute("SpecimenId") == string.format("S%d-5", R),
+			"vitrine 2 après reconnexion"
+		)
+		expect(string.find(refs.model:GetAttribute("Styles"), "/fair", 1, true), "thème perdu après reconnexion")
+		local final = world:getProfile(R)
+		museum.onPlayerRemoving(R)
+		world:removePlayer(R, os.clock())
+		service:release(R, final)
+	end)
+
 	check("musee.liberation_parcelle", function()
 		museum.onPlayerRemoving(M)
 		world:removePlayer(M, os.clock())
