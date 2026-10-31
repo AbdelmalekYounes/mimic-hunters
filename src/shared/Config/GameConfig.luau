@@ -9,7 +9,7 @@
 ]]
 
 local GameConfig = {
-	Version = "0.3.0",
+	Version = "0.3.1",
 
 	Hunt = {
 		-- Nombre de Mimics partagés cachés simultanément dans le monde.
@@ -112,17 +112,24 @@ local GameConfig = {
 		ZoneRadius = 26,
 		ScanCooldown = 2.5,
 		InspectCooldown = 0.4,
-		MissCooldown = 1.0,
+		-- Un raté coûte du temps et des points (V0.3.1, jalon 5 : avant, −15 et 1 s ; examiner
+		-- au hasard valait presque suivre les indices). Simulation : `lune run tools/balance`.
+		MissCooldown = 2.5,
 		-- Bandes du scanner (distance à la copie non trouvée la plus proche).
 		StrongBand = 7,
 		MediumBand = 14,
 		WeakBand = 24,
 		-- Score : trouvailles, ratés, bonus de temps si tout est trouvé.
 		FoundPoints = 100,
-		MissPenalty = 15,
+		MissPenalty = 40,
 		TimeBonusPerSecond = 2,
-		ClueIntervalMin = 5,
-		ClueIntervalMax = 8,
+		-- Indices un par un : seule la première copie non trouvée se trahit (1er indice après
+		-- 5 à 10 s, puis toutes les 6 à 10 s) ; les autres se débusquent au scanner. Avant :
+		-- les 3 copies se trahissaient dès 1,5 s et tout défi finissait en 6 à 8 s.
+		SequentialClues = true,
+		FirstClueMin = 5,
+		ClueIntervalMin = 6,
+		ClueIntervalMax = 10,
 		-- Délai entre deux défis pour un même visiteur (anti-répétition).
 		RepeatCooldown = 20,
 	},

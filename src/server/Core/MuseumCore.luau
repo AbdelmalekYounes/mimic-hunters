@@ -471,7 +471,8 @@ function MuseumCore.startHunt(self: any, visitorId: number, ownerId: any, positi
 			entry.kind = if species then species.kind else "Chair"
 			table.insert(copyKinds, entry.kind)
 			entry.clues = if species then species.behavior.clues else { "Wiggle" }
-			entry.nextClueAt = now + rng:nextRange(1.5, rules.ClueIntervalMax)
+			entry.nextClueAt = now + rng:nextRange(rules.FirstClueMin or 1.5, rules.ClueIntervalMax)
+			entry.order = order
 		else
 			-- Les copies passent en premier dans la boucle : copyKinds est déjà rempli.
 			local pool = if #copyKinds > 0 then copyKinds else PROP_KINDS
@@ -578,6 +579,17 @@ function MuseumCore.huntInspect(self: any, visitorId: number, position: any, pro
 		entry.found = true
 		hunt.found += 1
 		hunt.inspectReadyAt = now + rules.InspectCooldown
+		-- Indices un par un : la copie suivante ne se trahit qu'après un nouveau délai.
+		if rules.SequentialClues then
+			for _, other in hunt.props do
+				if other.copy and not other.found then
+					other.nextClueAt = math.max(
+						other.nextClueAt,
+						now + self._rng:nextRange(rules.FirstClueMin or 1.5, rules.ClueIntervalMax)
+					)
+				end
+			end
+		end
 		push(events, "_HuntRemoveProp", nil, { huntId = hunt.id, propId = entry.propId })
 		push(events, "HuntUpdate", visitorId, {
 			phase = "found",
@@ -636,7 +648,20 @@ function MuseumCore.tick(self: any, now: number, positions: { [number]: any }): 
 			self:_cancelHunt(events, hunt, "LeftZone", now)
 			continue
 		end
+		-- Indices un par un (option) : seule la première copie non trouvée se trahit ; les
+		-- autres restent à débusquer au scanner (jalon 5 : une vraie mini-chasse).
+		local active = nil
+		if rules.SequentialClues then
+			for _, entry in hunt.props do
+				if entry.copy and not entry.found and (active == nil or entry.order < active.order) then
+					active = entry
+				end
+			end
+		end
 		for _, entry in hunt.props do
+			if rules.SequentialClues and entry ~= active then
+				continue
+			end
 			if entry.copy and not entry.found and now >= entry.nextClueAt then
 				entry.nextClueAt = now + self._rng:nextRange(rules.ClueIntervalMin, rules.ClueIntervalMax)
 				push(events, "Clue", hunt.visitorId, {

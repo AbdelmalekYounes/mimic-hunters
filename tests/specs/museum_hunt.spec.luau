@@ -199,7 +199,7 @@ describe("Museum Hunt — déroulement", function()
 		local last
 		for _, entry in hunt.props do
 			if entry.copy then
-				now += 2
+				now += RULES.MissCooldown + 0.5
 				local events, reply = core:huntInspect(VISITOR, spotOf(core, hunt, entry), entry.propId, now)
 				expect(reply.result).toBe("HuntFound")
 				expect(#named(events, "_HuntRemoveProp")).toBe(1)
@@ -270,7 +270,7 @@ describe("Museum Hunt — déroulement", function()
 		local _, core = setup()
 		start(core, 1)
 		local clues = {}
-		for t = 2, 20, 0.5 do
+		for t = 2, 45, 0.5 do
 			for _, event in named(core:tick(t, {}), "Clue") do
 				table.insert(clues, event)
 			end
@@ -457,5 +457,49 @@ describe("Museum Hunt — correctifs de l'audit V0.3.1", function()
 			end
 		end
 		expect(limited).toBe(true)
+	end)
+end)
+
+describe("Museum Hunt — équilibrage V0.3.1", function()
+	it("une seule copie se trahit à la fois, la suivante après sa découverte", function()
+		local _, core = setup()
+		start(core, 1)
+		local hunt = session(core)
+		local function cluesBetween(from, to)
+			local seen = {}
+			for t = from, to, 0.5 do
+				for _, event in named(core:tick(t, {}), "Clue") do
+					seen[event.payload.propId] = true
+				end
+			end
+			return seen
+		end
+		-- Aucun indice avant FirstClueMin.
+		local early = cluesBetween(1.5, 1 + RULES.FirstClueMin - 0.5)
+		expect(next(early)).toBeNil()
+		local first = cluesBetween(1 + RULES.FirstClueMin, 40)
+		local count, active = 0, nil
+		for propId in first do
+			count += 1
+			active = propId
+		end
+		expect(count).toBe(1)
+		-- Trouvée : une autre copie prend le relais.
+		local entry = hunt.props[active]
+		core:huntInspect(VISITOR, spotOf(core, hunt, entry), active, 41)
+		local next_ = cluesBetween(41.5, 70)
+		expect(next_[active]).toBeNil()
+		local others = 0
+		for _ in next_ do
+			others += 1
+		end
+		expect(others).toBe(1)
+	end)
+
+	it("récompense la chasse plutôt que l'examen au hasard (réglages actuels)", function()
+		-- Garde-fou de tools/balance : un raté coûte au moins 2 s et 40 points.
+		expect(RULES.MissPenalty >= 40).toBe(true)
+		expect(RULES.MissCooldown >= 2).toBe(true)
+		expect(RULES.SequentialClues).toBe(true)
 	end)
 end)
