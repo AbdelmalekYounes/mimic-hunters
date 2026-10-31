@@ -396,6 +396,40 @@ local function serverSuite()
 		)
 	end)
 
+	check("sauvegarde.cycle_studio", function()
+		-- Vrai ProfileService du serveur (stockage choisi par DataStoreBackend.choose).
+		-- selene: allow(global_usage)
+		local profiles = (_G :: any).MimicProfiles
+		expect(profiles ~= nil, "_G.MimicProfiles absent")
+		log("stockage des profils :", profiles.name)
+		local service = profiles.service
+		local C = -3003
+		local status, data = service:load(C)
+		expect(status == "Ready", "chargement : " .. tostring(status))
+		world:addPlayer(C, os.clock(), data)
+		local species = MimicCatalog.get("lumino")
+		-- Même chemin d'écriture qu'une capture (la capture complète est testée plus haut).
+		local ok, info = world:inventoryOf(C):grant("studio:cycle-1", "lumino", species.rarity, "Spectral", 4242)
+		expect(ok, "ajout refusé : " .. tostring(info))
+		local id = info.specimen.id
+		expect(service:save(C, world:getProfile(C)), "sauvegarde périodique échouée")
+		local profile = world:getProfile(C)
+		world:removePlayer(C, os.clock())
+		expect(service:release(C, profile), "sauvegarde finale échouée")
+		-- Reconnexion : le même exemplaire revient, avec sa mutation et sa graine.
+		local again, reloaded = service:load(C)
+		expect(again == "Ready", "rechargement : " .. tostring(again))
+		world:addPlayer(C, os.clock(), reloaded)
+		local specimen = world:inventoryOf(C):specimen(id)
+		expect(specimen ~= nil, "exemplaire perdu après reconnexion")
+		expect(specimen.mutation == "Spectral" and specimen.seed == 4242, "mutation ou graine modifiée")
+		local duplicate = world:inventoryOf(C):grant("studio:cycle-1", "lumino", species.rarity, "Spectral", 1)
+		expect(not duplicate, "même événement de capture accordé deux fois")
+		local final = world:getProfile(C)
+		world:removePlayer(C, os.clock())
+		service:release(C, final)
+	end)
+
 	world:removePlayer(A, os.clock())
 	world:removePlayer(B, os.clock())
 	check("joueurs.retrait_faux_joueurs", function()

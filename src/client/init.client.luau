@@ -47,4 +47,24 @@ Remotes.get("Notice").OnClientEvent:Connect(function(payload)
 	ClientState.toast(tostring(payload.text))
 end)
 
+-- État du profil : le joueur sait toujours si ses captures seront conservées.
+local PROFILE_MESSAGES = {
+	Unavailable = "Sauvegarde indisponible : captures en pause, nouvel essai dans 30 s.",
+	Locked = "Ton profil est encore ouvert sur un autre serveur : captures en pause, nouvel essai bientôt.",
+	FutureVersion = "Ton profil vient d'une version plus récente du jeu : captures désactivées ici.",
+	Corrupt = "Profil illisible : captures désactivées pour protéger tes données.",
+	Lost = "Profil ouvert ailleurs : captures arrêtées.",
+}
+Remotes.get("ProfileStatus").OnClientEvent:Connect(function(payload)
+	local previous = ClientState.profileStatus
+	ClientState.profileStatus = payload.status
+	ClientState.ProfileStatusChanged:Fire(payload.status)
+	local message = PROFILE_MESSAGES[payload.status]
+	if message then
+		ClientState.toast(message)
+	elseif payload.status == "Ready" and previous ~= "Loading" and previous ~= "Ready" then
+		ClientState.toast("Profil chargé : tes captures sont de nouveau sauvegardées.")
+	end
+end)
+
 Remotes.get("ClientReady"):FireServer()

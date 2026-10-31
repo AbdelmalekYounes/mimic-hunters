@@ -56,9 +56,10 @@ function Fixtures.config(overrides: any?): any
 	return config
 end
 
-function Fixtures.world(seed: number?, overrides: any?): (any, any)
+-- `worldOptions` complète les options de HuntWorld.new (serverId, wallClock, mutations, objectives…).
+function Fixtures.world(seed: number?, overrides: any?, worldOptions: any?): (any, any)
 	local config = Fixtures.config(overrides)
-	local world = HuntWorld.new({
+	local options = {
 		config = config,
 		catalog = MimicCatalog,
 		rarities = Rarities,
@@ -66,7 +67,14 @@ function Fixtures.world(seed: number?, overrides: any?): (any, any)
 		tutorialSlot = MapLayout.TutorialProp,
 		zones = MapLayout.zoneIds(),
 		rng = Rng.new(seed or 1234),
-	})
+		wallClock = function()
+			return 1700000000
+		end,
+	}
+	for k, v in worldOptions or {} do
+		options[k] = v
+	end
+	local world = HuntWorld.new(options)
 	world:populate(0)
 	return world, config
 end

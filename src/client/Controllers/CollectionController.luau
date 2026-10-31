@@ -39,9 +39,7 @@ local popupModel: Model? = nil
 local popupToken = 0
 
 local function snapshotCount(speciesId: string): number
-	local snapshot = ClientState.inventory
-	local entry = snapshot and snapshot.species and snapshot.species[speciesId]
-	return if entry then entry.count else 0
+	return ClientState.ownedCount(speciesId)
 end
 
 -- Place un modèle dans un ViewportFrame avec une caméra cadrée sur sa hauteur.
@@ -65,14 +63,9 @@ local function frameModel(viewport: ViewportFrame, model: Model, kind: string)
 end
 
 local function refreshStats()
-	local snapshot = ClientState.inventory
-	local total = if snapshot then snapshot.totalCaptures or 0 else 0
-	local discovered = 0
-	if snapshot and snapshot.species then
-		for _ in snapshot.species do
-			discovered += 1
-		end
-	end
+	local summary = ClientState.summary
+	local total = if summary then summary.totalCaptures or 0 else 0
+	local discovered = if summary then summary.discovered or 0 else 0
 	refs.stats.Text = string.format("Captures : %d   ·   Espèces : %d/%d", total, discovered, MimicCatalog.count())
 	refs.codexProgress.Text = string.format("%d / %d espèces découvertes", discovered, MimicCatalog.count())
 end
@@ -238,9 +231,23 @@ function CollectionController.start(hudRefs: any)
 		return Enum.ContextActionResult.Sink
 	end, false, Enum.KeyCode.C, Enum.KeyCode.ButtonSelect)
 
-	Remotes.get("InventoryUpdate").OnClientEvent:Connect(function(payload)
-		ClientState.inventory = payload.snapshot
-		ClientState.InventoryChanged:Fire(payload.snapshot)
+	Remotes.get("CollectionSnapshot").OnClientEvent:Connect(function(view)
+		ClientState.applyCollectionSnapshot(view)
+	end)
+	Remotes.get("CollectionDelta").OnClientEvent:Connect(function(delta)
+		ClientState.applyCollectionDelta(delta)
+	end)
+	Remotes.get("CollectionResult").OnClientEvent:Connect(function(payload)
+		if payload.ok and payload.result then
+			if payload.result.updated then
+				ClientState.applySpecimenUpdate(payload.result.updated)
+			end
+			if payload.result.summary then
+				ClientState.applyCollectionDelta({ summary = payload.result.summary })
+			end
+		end
+	end)
+	ClientState.CollectionChanged:Connect(function()
 		refreshStats()
 		for _, species in MimicCatalog.list() do
 			refreshCard(species)

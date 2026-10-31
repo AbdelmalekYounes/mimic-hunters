@@ -228,8 +228,8 @@ local function runTests(payload: any)
 		local c1 = remote("CaptureResolved").OnClientEvent:Connect(function(p)
 			resolved = p
 		end)
-		local c2 = remote("InventoryUpdate").OnClientEvent:Connect(function(p)
-			inventory = p.snapshot
+		local c2 = remote("CollectionDelta").OnClientEvent:Connect(function(p)
+			inventory = p
 		end)
 		local started = request("RequestCapture", "CaptureStarted", 5, inspect.mimicId)
 		expect(started and started.ok, "CaptureStarted refusé : " .. tostring(started and started.reason))
@@ -265,8 +265,15 @@ local function runTests(payload: any)
 		c2:Disconnect()
 		expect(hits >= 2, "2 impulsions réussies attendues, obtenu " .. hits)
 		expect(resolved and resolved.success, "capture non confirmée par le serveur")
-		expect(inventory and inventory.species and inventory.species.chairy, "Chairy absent de l'inventaire")
+		expect(
+			inventory and inventory.added and inventory.added.speciesId == "chairy",
+			"exemplaire Chairy absent de la collection"
+		)
+		expect(type(inventory.added.id) == "string" and inventory.added.id ~= "", "identifiant d'exemplaire absent")
+		-- Le Mimic du tutoriel est toujours Standard.
+		expect(inventory.added.mutation == "Standard", "mutation du tutoriel : " .. tostring(inventory.added.mutation))
 		capturedSpecies = "chairy"
+		env.specimenId = inventory.added.id
 		-- Contrôle indicatif de cohérence affichage/serveur (non bloquant).
 		env.cursorCheck = CaptureMinigame.cursorAt(stage, 0)
 	end)

@@ -60,6 +60,8 @@ local REASONS: { [string]: string } = {
 	Expired = "Trop tard… il s'est faufilé ailleurs.",
 	AlreadyCapturing = "Termine d'abord ta capture en cours.",
 	UnknownMimic = "Ce Mimic n'est plus là.",
+	ProfileUnavailable = "Ton profil n'est pas encore sauvegardable : capture impossible pour l'instant.",
+	CollectionFull = "Collection pleine (2000 Mimics) : impossible d'en capturer davantage pour l'instant.",
 }
 
 local function rootPart(): BasePart?

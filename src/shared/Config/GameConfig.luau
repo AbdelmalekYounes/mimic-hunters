@@ -1,6 +1,6 @@
 --!strict
 --[[
-	GameConfig — tous les réglages de gameplay de la V0.1.
+	GameConfig — tous les réglages de gameplay.
 
 	Les distances sont en studs, les durées en secondes. Ces valeurs sont
 	lues à la fois par le serveur (autorité) et par le client (affichage,
@@ -9,7 +9,7 @@
 ]]
 
 local GameConfig = {
-	Version = "0.1.0",
+	Version = "0.2.0",
 
 	Hunt = {
 		-- Nombre de Mimics partagés cachés simultanément dans le monde.
@@ -89,6 +89,18 @@ local GameConfig = {
 		Inspect = { capacity = 6, refillPerSecond = 4 },
 		Capture = { capacity = 4, refillPerSecond = 2 },
 		Pulse = { capacity = 6, refillPerSecond = 5 },
+		-- Favoris, cosmétiques, réglages.
+		Collection = { capacity = 8, refillPerSecond = 3 },
+	},
+
+	-- Sauvegardes (voir ProfileService pour le détail des délais).
+	Save = {
+		-- Expérience publiée.
+		StoreName = "MimicHunters_Profiles_v2",
+		-- Studio : stockage distinct, pour ne jamais écraser les profils du jeu publié.
+		StudioStoreName = "MimicHunters_Profiles_v2_STUDIO",
+		-- Nouvelle tentative de chargement quand le profil était indisponible ou verrouillé.
+		ReloadRetryInterval = 30,
 	},
 
 	Player = {

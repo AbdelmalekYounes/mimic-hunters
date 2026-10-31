@@ -19,6 +19,10 @@ Remotes.ClientToServer = table.freeze({
 	"RequestInspect",
 	"RequestCapture",
 	"SubmitPulse",
+	-- Collection (V0.2) : demandes validées par le serveur (propriété, déblocage, types).
+	"SetFavorite",
+	"EquipCosmetic",
+	"UpdateSettings",
 })
 
 Remotes.ServerToClient = table.freeze({
@@ -29,7 +33,12 @@ Remotes.ServerToClient = table.freeze({
 	"CaptureStarted",
 	"PulseResult",
 	"CaptureResolved",
-	"InventoryUpdate",
+	-- Collection complète à la connexion, puis ajouts et résumé après chaque capture.
+	"CollectionSnapshot",
+	"CollectionDelta",
+	"CollectionResult",
+	-- État du profil : Ready, Unavailable, Locked, Lost, FutureVersion, Corrupt.
+	"ProfileStatus",
 	"TutorialUpdate",
 	"Clue",
 	"Notice",

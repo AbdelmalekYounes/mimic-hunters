@@ -19,20 +19,78 @@ export type MimicInfo = {
 	expiresAt: number?,
 }
 
+--[[
+	Collection vue par le client (copie de ce que le serveur envoie, jamais modifiée localement) :
+	summary = { totalCaptures, discovered, owned, maxSpecimens, mutations, codex, objectives,
+	            cosmetics, settings }
+	specimens = liste des exemplaires, du plus récent au plus ancien ; byId pour l'accès direct.
+]]
 local ClientState = {
 	userId = Players.LocalPlayer.UserId,
 	mimics = {} :: { [string]: MimicInfo },
-	inventory = nil :: any,
+	summary = nil :: any,
+	specimens = {} :: { any },
+	specimensById = {} :: { [string]: any },
+	profileStatus = "Loading",
 	tutorialStep = "Done",
 	tutorialPropId = nil :: string?,
 	attemptActive = false,
 
 	MimicChanged = Signal.new(), -- (info: MimicInfo, previousState: string?)
-	InventoryChanged = Signal.new(), -- (snapshot)
+	CollectionChanged = Signal.new(), -- (reason: "snapshot" | "added" | "updated" | "summary", specimen?)
+	ProfileStatusChanged = Signal.new(), -- (status)
 	TutorialChanged = Signal.new(), -- (step, propId)
 	AttemptChanged = Signal.new(), -- (active: boolean)
 	Toast = Signal.new(), -- (text, kind)
 }
+
+function ClientState.applyCollectionSnapshot(view: any)
+	ClientState.summary = view
+	ClientState.specimens = {}
+	ClientState.specimensById = {}
+	for _, specimen in view.specimens or {} do
+		table.insert(ClientState.specimens, specimen)
+		ClientState.specimensById[specimen.id] = specimen
+	end
+	view.specimens = nil
+	ClientState.CollectionChanged:Fire("snapshot", nil)
+end
+
+function ClientState.applyCollectionDelta(delta: any)
+	if delta.summary then
+		ClientState.summary = delta.summary
+	end
+	local added = delta.added
+	if added and ClientState.specimensById[added.id] == nil then
+		table.insert(ClientState.specimens, 1, added)
+		ClientState.specimensById[added.id] = added
+		ClientState.CollectionChanged:Fire("added", added)
+	elseif delta.summary then
+		ClientState.CollectionChanged:Fire("summary", nil)
+	end
+end
+
+function ClientState.applySpecimenUpdate(updated: any)
+	local current = ClientState.specimensById[updated.id]
+	if current == nil then
+		return
+	end
+	for k, v in updated do
+		current[k] = v
+	end
+	ClientState.CollectionChanged:Fire("updated", current)
+end
+
+-- Nombre d'exemplaires possédés d'une espèce.
+function ClientState.ownedCount(speciesId: string): number
+	local n = 0
+	for _, specimen in ClientState.specimens do
+		if specimen.speciesId == speciesId then
+			n += 1
+		end
+	end
+	return n
+end
 
 function ClientState.mimicAtProp(propId: string): MimicInfo?
 	for _, info in ClientState.mimics do
