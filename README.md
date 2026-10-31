@@ -1,10 +1,15 @@
-# MIMIC HUNTERS — V0.3.1 (validation, optimisation, équilibrage)
+# MIMIC HUNTERS — V0.3.2 (expérience privée de test)
 
 Jeu Roblox multijoueur de chasse et de collection : des créatures, les **Mimics**, se
 déguisent en objets ordinaires. Le joueur les repère grâce à des indices, les examine,
 puis les stabilise avec un court minijeu pour les capturer.
 
 **Chercher → Détecter → Capturer → Découvrir → Collectionner.**
+
+V0.3.2 (branche `feature/v0.3.2-private-playtest`) : le jeu tourne dans une **expérience
+Roblox privée** (« MIMIC HUNTERS — Private Test », jamais publique) ; la sauvegarde est validée
+sur le **vrai DataStore** (11/11 scénarios) ; guide des testeurs et modèle de résultats prêts.
+Bilan : [docs/V032_VALIDATION.md](docs/V032_VALIDATION.md).
 
 V0.3.1 (branche `feature/v0.3.1-validation`) : version de qualité, sans nouveau contenu —
 audit technique, sauvegardes fiabilisées (accès concurrents, fermeture, données illisibles),
@@ -25,7 +30,8 @@ Nouveautés de la V0.2 :
 - **objectifs du collectionneur** avec titres et couleurs de scanner garantis.
 
 Projet indépendant, créé de zéro (aucun code ni asset repris d'un autre projet).
-Rien n'est publié : la place se construit et se teste en local.
+Aucune publication publique : seule une expérience privée de test existe (propriétaire et
+testeurs invités uniquement).
 
 ## Prérequis
 
@@ -151,7 +157,11 @@ docs/                  GAME_DESIGN, ARCHITECTURE, DATA_SCHEMA, TESTING, ROADMAP,
 - [docs/V031_VALIDATION.md](docs/V031_VALIDATION.md) — bilan de la V0.3.1 et verdict
 - [docs/BALANCE.md](docs/BALANCE.md) — analyse d'équilibrage (simulations)
 - [docs/PLAYTEST_PLAN.md](docs/PLAYTEST_PLAN.md) — protocole de test avec 3 à 5 joueurs
-- [docs/PRIVATE_TEST_PUBLISH.md](docs/PRIVATE_TEST_PUBLISH.md) — préparer une publication privée (rien n'est publié)
+- [docs/PRIVATE_TEST_PUBLISH.md](docs/PRIVATE_TEST_PUBLISH.md) — expérience privée de test : état, mise à jour, ce qui reste à faire
+- [docs/REAL_DATASTORE_VALIDATION.md](docs/REAL_DATASTORE_VALIDATION.md) — validation sur le vrai DataStore (11/11)
+- [docs/V032_VALIDATION.md](docs/V032_VALIDATION.md) — bilan de la V0.3.2 et verdict
+- [docs/TESTER_GUIDE.md](docs/TESTER_GUIDE.md) — guide à envoyer aux testeurs
+- [docs/PLAYTEST_RESULTS.md](docs/PLAYTEST_RESULTS.md) — modèle de résultats (vide tant qu'aucun joueur n'a été observé)
 - [docs/TESTING.md](docs/TESTING.md) — tests automatisés Studio sans monopoliser le PC
 - [docs/VM_SETUP.md](docs/VM_SETUP.md) — VM VMware pour les tests graphiques (`test-vm.cmd`)
 

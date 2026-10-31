@@ -69,6 +69,18 @@ Bilan : [V03_VALIDATION.md](V03_VALIDATION.md).
 | 7 — Mesures | SessionMetrics + AnalyticsService ; plan de playtest | ✅ (envoi réel non observé) |
 | 8 — Finition | suite complète, VM, captures, rapport | voir [V031_VALIDATION.md](V031_VALIDATION.md) |
 
+## V0.3.2 — Expérience privée et playtests réels (branche `feature/v0.3.2-private-playtest`)
+
+| Étape | État |
+|---|---|
+| Expérience privée « MIMIC HUNTERS — Private Test » (univers 10773995454) | ✅ créée, privée, API Studio activée pour elle seule |
+| Vrai DataStore | ✅ 11/11 scénarios ; jeu réel : persistance entre deux sessions (Studio) |
+| Jeu déployé (sans contrôle DataStore) | ✅ |
+| 8 joueurs par serveur | ⏳ à régler dans le Creator Hub (propriétaire) |
+| Test sur serveur publié, testeurs, appareils réels, statistiques | ⏳ à faire avec de vrais joueurs (TESTER_GUIDE.md, PLAYTEST_RESULTS.md) |
+
+Bilan : [V032_VALIDATION.md](V032_VALIDATION.md). V0.4 : décision après la première séance réelle.
+
 ## V0.2.x — Suite possible
 
 - Équilibrage à partir des sessions de test : fréquence des indices, portées, largeurs de zone.

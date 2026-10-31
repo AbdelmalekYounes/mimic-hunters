@@ -1,82 +1,75 @@
-# MIMIC HUNTERS — Préparer une publication privée de test (V0.3.1)
+# MIMIC HUNTERS — Expérience privée de test (V0.3.2)
 
-> **Rien n'a été publié.** Ce document prépare une publication que **toi seul** peux
-> autoriser. Aucune expérience Roblox n'a été créée, aucun réglage de compte ou d'expérience n'a
-> été modifié.
+## 1. État (31/10/2026)
 
-## 1. Pourquoi publier
+| Élément | Valeur | Vérifié |
+|---|---|---|
+| Nom | MIMIC HUNTERS — Private Test | ✅ Studio (paramètres d'expérience) |
+| Propriétaire | `youyou31110` (ID 941826283) | ✅ `StudioService:GetUserId()` avant publication |
+| Univers / lieu de départ | `10773995454` / `91525576925499` | ✅ `game.GameId`, `game.PlaceId` |
+| Lien | https://www.roblox.com/games/91525576925499 (visible seulement du propriétaire et des testeurs invités) | ✅ un visiteur non connecté voit une page vide « Title Unavailable » ; l'API publique ne renvoie rien |
+| Audience | **privée** : « Disponible uniquement pour vous et vos collaborateurs » | ✅ fenêtre Gérer l'audience, après chaque publication |
+| Accès de Studio aux services API | activé (cette expérience seulement) | ✅ |
+| Requêtes HTTP, ventes et téléports tiers | désactivés | ✅ |
+| Création en équipe, partage de données (IA) | désactivés | ✅ |
+| Produits Robux, monétisation | aucun | ✅ |
+| Version jouable publiée | `default.project.json` (sans contrôle DataStore) | ✅ « INSTALLÉ … contrôle DataStore : false » puis « Nouveaux changements publiés » |
+| Joueurs max par serveur | **pas encore réglé** (12 par défaut) | ⏳ à faire par toi (§ 3.1) |
 
-Studio, sur une place non publiée, n'a pas accès aux DataStores : toute la persistance a été
-testée avec des stockages simulés (Lune, mémoire de Studio). Trois choses ne se vérifient que
-sur une expérience publiée :
+Expérience existante « youyou31110's Place » : jamais touchée.
 
-| À vérifier | Comment |
-|---|---|
-| Le vrai DataStore (`UpdateAsync`, verrous, latence réelle) | script de contrôle automatique (§ 3) |
-| Deux serveurs réellement distincts, fermeture réelle (`BindToClose`) | manipulations manuelles (§ 4) |
-| Plusieurs vrais joueurs (visites, Museum Hunt, captures concurrentes) | playtest ([PLAYTEST_PLAN.md](PLAYTEST_PLAN.md)) |
+## 2. Mettre à jour le jeu sur l'expérience privée
 
-## 2. Principe de sécurité
+« Publier sous → Écrire par dessus » restait bloqué dans Studio (« Importation en cours… » plus
+de 3 minutes, deux essais). Méthode qui fonctionne (le jeu n'est que du code : la carte est
+générée au démarrage) :
 
-- Une **expérience de test séparée**, privée, créée pour l'occasion (par exemple
-  « MIMIC HUNTERS — Test privé »). Les DataStores appartiennent à l'expérience : ceux du test
-  ne peuvent jamais toucher ceux d'une future expérience publique.
-- Le script de contrôle écrit dans un DataStore **dédié** (`MimicHunters_DataStoreCheck_v031`),
-  avec des clés `check_<exécution>_<n>` où `n` est négatif (impossible pour un vrai joueur). Il
-  ne supprime rien.
-- Le jeu lui-même écrit dans `MimicHunters_Profiles_v2` **de l'expérience de test** : ce sont
-  des profils de test.
-- Aucune opération destructive, aucun produit Robux, aucune modification de sécurité du
-  compte.
+1. `rojo build deploy/import-game.project.json -o build/MimicImport-game.rbxm`
+   (`deploy/import-check.project.json` pour la version avec le contrôle DataStore).
+2. Studio : ouvrir le lieu depuis Roblox (`RobloxStudioBeta.exe -task EditPlace -placeId 91525576925499 -universeId 10773995454`).
+3. Explorer → clic droit sur Workspace → Insérer → **Importer le modèle Roblox** → le fichier `.rbxm`.
+4. Barre de commande : coller `deploy/install.luau` (sur une ligne), Exécuter →
+   « INSTALLÉ true true true ».
+5. **Fichier → Publier** (Alt+P).
 
-## 3. Contrôle automatique du vrai DataStore
+Dans la VM, ces étapes sont pilotées par la télécommande : `test-vm.cmd -Remote`, puis
+`tools\vm-do.ps1` (actions dans la VM seulement, jamais sur ton bureau).
 
-Fichiers :
+## 3. Ce qui demande ton intervention
 
-- `datastore-check.project.json` : le jeu + le contrôle. **Ne jamais publier ce fichier sur
-  une expérience publique.**
-- `tests/datastore/DataStoreCheck.luau` : 9 scénarios (1, 2–4, 5–9, 10, 13, 14, 15, corruption,
-  16 partiel), exécutés par le vrai `ProfileService`.
-- `tests/datastore/RealDataStoreCheck.server.luau` : lanceur Roblox.
-- Le script a été vérifié sur un DataStore simulé (`tests/specs/datastore_check.spec.luau` :
-  9/9). Cela prouve que le script est juste, **pas** que le vrai DataStore se comporte pareil.
+### 3.1 Huit joueurs par serveur (2 min)
 
-Étapes, à faire toi-même ou à m'autoriser explicitement à faire dans la VM :
+Creator Hub (connecté en `youyou31110`) → Créations → *MIMIC HUNTERS — Private Test* →
+**Configurer → Lieux** → le lieu → réglage du **nombre maximal de joueurs** : **8** → Enregistrer.
+(Studio n'expose pas ce réglage ; la VM n'est pas connectée à Roblox dans son navigateur et je
+n'entre aucun mot de passe.)
 
-1. Construire la place : `rojo build datastore-check.project.json -o build/DataStoreCheck.rbxl`.
-2. L'ouvrir dans Studio, puis **Fichier → Publier sur Roblox sous… → Nouvelle expérience**,
-   nom « MIMIC HUNTERS — Test privé ». Accès : **privé**.
-3. Paramètres du jeu → Sécurité → **Activer l'accès de Studio aux services d'API**, sur
-   **cette expérience de test uniquement**.
-4. Lancer **Jouer** (ou **Exécuter**). La sortie affiche une ligne `[DataStoreCheck]` par
-   scénario, puis le total (attribut `DataStoreCheck` de Workspace). Durée ≈ 1 à 2 min.
-5. Me transmettre la sortie (copie du texte) pour que je l'ajoute au rapport.
+### 3.2 Test sur un vrai serveur publié (10 min)
 
-## 4. Vérifications manuelles (vrais serveurs)
+Avec le compte `youyou31110`, sur ton PC ou ton téléphone (ou dans la VM après t'être connecté
+toi-même dans Edge) :
 
-À faire sur l'expérience de test, avec la place normale (`default.project.json`) publiée.
+| # | Manipulation | Attendu |
+|---|---|---|
+| M1 | rejoindre le jeu, capturer 2–3 Mimics, en exposer, changer une couleur, quitter | — |
+| M2 | rejoindre une nouvelle session | mêmes Mimics (numéros, mutations), mêmes vitrines et couleurs |
+| M3 | Creator Hub → Serveurs → arrêter les serveurs pendant une partie, puis revenir | dernière capture conservée |
+| M4 | console (F9) → onglet Serveur : chercher `profils : DataStore MimicHunters_Profiles_v2` | le jeu publié utilise le DataStore de cette expérience |
 
-| # | Scénario | Manipulation | Attendu |
-|---|---|---|---|
-| M1 | Reconnexion sur un autre serveur | capturer 1 Mimic, quitter, rejoindre un **autre** serveur (Creator Hub → Serveurs, ou ami sur un autre serveur) | le Mimic est là, même numéro, même mutation |
-| M2 | Changement de serveur rapide | rejoindre un 2e serveur sans attendre | message « encore ouvert sur un autre serveur », puis chargement < 1 min, rien de perdu |
-| M3 | Fermeture du serveur | capturer, puis arrêter le serveur (Creator Hub → Arrêter tous les serveurs) | à la reconnexion, la capture est là |
-| M4 | Exposition + reconnexion | exposer 6 Mimics, changer les 4 styles, quitter, revenir | musée identique |
-| M5 | Plusieurs joueurs | voir [PLAYTEST_PLAN.md](PLAYTEST_PLAN.md) | — |
+Note les résultats dans [PLAYTEST_RESULTS.md](PLAYTEST_RESULTS.md) § 5.
 
-Les pannes réelles de DataStore (scénarios 11 et 12) ne se provoquent pas à la demande : elles
-restent couvertes par les tests simulés (pannes injectées, panne prolongée → acquisitions
-suspendues).
+### 3.3 Inviter des testeurs (quand tu veux)
 
-## 5. Ce qui reste bloqué sans publication
+Voir [TESTER_GUIDE.md](TESTER_GUIDE.md) : **Fichier → Inviter des testeurs anticipés** (10 amis
+Roblox au plus du compte propriétaire, accès joueur seulement). Ne jamais cliquer « Publier
+publiquement ».
 
-Scénarios 4 (vrai second serveur), 14 (vrai arrêt brutal), 16 (vrai `BindToClose`), latence et
-quotas réels du DataStore, comportement avec plusieurs vrais joueurs. Tant que ce n'est pas fait,
-les rapports gardent la mention « vrai DataStore non validé ».
+### 3.4 Statistiques
 
-## 6. Ce dont j'ai besoin de ta part
+Creator Hub → l'expérience → **Analytics** (entonnoir d'intégration, événements personnalisés),
+24 à 48 h après des parties sur un serveur publié. Studio n'envoie rien (voulu).
 
-- Ton **autorisation explicite** pour créer l'expérience de test et activer l'accès API dessus,
-  ou que tu fasses les étapes 2 et 3 toi-même.
-- Pour les vérifications manuelles et le playtest : 1 à 4 autres comptes que **tu** invites
-  (je ne crée et n'utilise aucun compte).
+## 4. Contrôle du vrai DataStore
+
+Résultats : [REAL_DATASTORE_VALIDATION.md](REAL_DATASTORE_VALIDATION.md) (11/11). Pour le relancer :
+version `import-check`, mode « Exécuter » dans Studio, lire les lignes `[DataStoreCheck]`.
