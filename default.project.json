@@ -13,6 +13,9 @@
         "Client": { "$path": "src/client" }
       }
     },
+    "Lighting": {
+      "$properties": { "Technology": "Voxel" }
+    },
     "Workspace": {
       "$properties": { "StreamingEnabled": false }
     }

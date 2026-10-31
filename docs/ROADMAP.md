@@ -41,6 +41,21 @@ Bilan détaillé : [V02_VALIDATION.md](V02_VALIDATION.md).
 2. Session de jeu avec de vrais joueurs : envie de collectionner, lisibilité des mutations.
 3. Vrai téléphone (la simulation de Studio n'en tient pas lieu) et mesures de performance.
 
+## V0.3 — Musées personnels et Museum Hunt (branche `feature/v0.3-museums`)
+
+| Jalon | Contenu | État |
+|---|---|---|
+| 1 — Bases personnelles | quartier, 8 parcelles, attribution serveur, file d'attente, musée, MA BASE / VILLAGE | ✅ |
+| 2 — Exposer | onglet Musée, sélecteur, rendu exact (mutations), animations, fiche d'inspection | ✅ |
+| 3 — Sauvegarde | profil v3, migration v2 → v3 sans perte, réparation, reconnexion | ✅ (**DataStore réel non validé**) |
+| 4 — Personnalisation | murs, lumière, socles, thème ; socle Étoilé en récompense | ✅ |
+| 5 — Visites | onglet Visites, visite, protections | ✅ |
+| 6 — Museum Hunt | défi de 75 s, anti-abus, record, musées différents | ✅ |
+| 7 — Interfaces | PC, téléphone, tablette (géométrie testée) | ✅ (vrai téléphone non testé) |
+| 8 — Performance | budget défini et mesuré dans Studio | ⚠️ indicatif (VM / bureau caché) |
+
+Bilan : [V03_VALIDATION.md](V03_VALIDATION.md).
+
 ## V0.2.x — Suite possible
 
 - Équilibrage à partir des sessions de test : fréquence des indices, portées, largeurs de zone.
@@ -49,7 +64,7 @@ Bilan détaillé : [V02_VALIDATION.md](V02_VALIDATION.md).
 - Analytics minimales (temps avant première capture, taux d'échec par espèce).
 - Relâcher des exemplaires (aujourd'hui la collection est plafonnée à 2000).
 
-## V0.3 — Profondeur de chasse
+## V0.4 — Profondeur de chasse (idées)
 
 - Nouvelles espèces et nouveaux types d'objets (au moins un par zone).
 - Comportements actifs : Mimics qui changent d'objet pendant la chasse, qui imitent un objet voisin.

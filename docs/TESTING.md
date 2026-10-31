@@ -123,6 +123,9 @@ test.cmd ─▶ tools/test-all.ps1
 | Sauvegardes (V0.2) | Lune + Studio · server | pannes injectées, budget, verrou frais / périmé, deux serveurs concurrents, verrou perdu, reconnexion, version future jamais écrasée ; cycle complet sur le vrai `ProfileService` de Studio (stockage mémoire) |
 | Exemplaires et idempotence | Lune + Studio | identifiants uniques sur 3 sessions, même événement de capture jamais accordé deux fois (y compris après rechargement) |
 | Mutations | Lune + Studio | distribution sur 200 000 tirages, tutoriel Standard, cohérence après reconnexion ; capture réelle forcée (serveur) et capture rare par le réseau (client PC : Chromatic, mobile : Spectral) |
+| Musées (V0.3) | Lune + Studio · server / client-pc / client-mobile | 8 parcelles, attribution et file d'attente, rendu exact de 6 Mimics (couleurs, Chromatic, Spectral), refus (non possédé, doublon), retrait, réorganisation, libération, migration v2 → v3, reconnexion (ProfileService réel, stockage mémoire), MA BASE / VILLAGE, mode décoration, personnalisation visible, visite et protections |
+| Museum Hunt (V0.3) | Lune + Studio | lancement et refus, copies jamais révélées, bandes du scanner, portée, cachettes inventées, fin au temps, annulation (propriétaire, visiteur, sortie du jardin), répétition limitée, spam ; partie complète jouée par le vrai client (PC et mobile simulé) |
+| Performance (V0.3) | Studio · client | Parts par musée, lumières, Mimics animés plafonnés, temps d'image (indicatif) |
 | Codex, inventaire, objectifs | Studio · client-pc / client-mobile | panneau dans l'écran, pages réellement visibles, codex découvert/manquant, fiche, favori aller-retour, objectif validé, titre affiché au-dessus du personnage |
 
 Contrôle de pertinence : en réintroduisant volontairement le bug de pivot corrigé en V0.1,

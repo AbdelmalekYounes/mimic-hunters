@@ -37,6 +37,9 @@ local MARGIN = 12
 local GAP = 8
 -- En dessous, Roblox affiche le petit bouton de saut (70 px, à ~25 px des bords bas et droit).
 HudLayout.CompactMaxSide = 500
+-- Hauteur minimale prise en charge (téléphone en paysage ≈ 300 px) : en dessous, HUD et
+-- minijeu de capture ne tiennent plus ensemble sans se chevaucher.
+HudLayout.MinHeight = 300
 -- Bouton de saut : zone à laisser libre en bas à droite (petit et grand modèle).
 HudLayout.JumpZone = {
 	compact = { w = 100, h = 96 },

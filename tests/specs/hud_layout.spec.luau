@@ -95,6 +95,16 @@ describe("HudLayout", function()
 		expect(layout.counter.x).toBe(12)
 	end)
 
+	it("prend en charge toutes les tailles testées, et pas en dessous de la hauteur minimale", function()
+		for _, screen in SCREENS do
+			expect(screen.h >= HudLayout.MinHeight).toBe(true)
+		end
+		-- Vue de jeu PC de 667×232 (mesurée dans la VM) : le minijeu ne peut plus tenir sous le
+		-- HUD, d'où la limite explicite.
+		local tiny = HudLayout.compute(667, 232, false)
+		expect(HudLayout.inside(tiny.signal, 667, 232)).toBe(false)
+	end)
+
 	it("détecte chevauchements et débordements", function()
 		local a = { x = 0, y = 0, w = 10, h = 10 }
 		expect(HudLayout.overlaps(a, { x = 9, y = 9, w = 5, h = 5 })).toBe(true)

@@ -134,6 +134,10 @@ function HuntServer.start()
 				-- Événement interne : jamais envoyé au client.
 				if event.name == "_ProfileChanged" and event.userId then
 					profiles:markDirty(event.userId, event.payload.important)
+					-- Le panneau du musée suit la collection (captures, découvertes).
+					if museum then
+						museum.refreshBoard(event.userId)
+					end
 				elseif event.name == "_CosmeticsChanged" and event.userId then
 					applyCosmetics(event.userId)
 				elseif museum then

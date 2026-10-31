@@ -233,6 +233,16 @@ function MuseumServer.start(context: any)
 	function service.refresh(userId: number)
 		dispatch(core:refresh(userId))
 	end
+	-- Panneau des statistiques seul (après une capture, un favori…) : les Mimics exposés ne
+	-- sont pas reconstruits.
+	function service.refreshBoard(userId: number)
+		local plot = core:plotOf(userId)
+		local collection = world:inventoryOf(userId)
+		local refs = plot and plots[plot]
+		if refs and collection then
+			MuseumBuilder.setBoard(refs, boardText(displayName(userId), collection:museumView().stats))
+		end
+	end
 	function service.onPlayerRemoving(userId: number)
 		dispatch(core:leave(userId, now()))
 	end

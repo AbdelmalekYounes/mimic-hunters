@@ -1,4 +1,4 @@
-# MIMIC HUNTERS — Données persistantes (V0.2)
+# MIMIC HUNTERS — Données persistantes (V0.2, V0.3)
 
 ## 1. Audit de la V0.1 (point de départ)
 
@@ -60,7 +60,8 @@ la capture est refusée avec un message (aucune perte silencieuse).
 |---|---|---|
 | rien | v2 | profil neuf |
 | v1 (V0.1) | v2 | chaque capture comptée devient un exemplaire Standard (graine déterministe), codex reconstruit |
-| v3+ | — | **refusé** (`FutureVersion`) : un ancien serveur n'écrase jamais un profil plus récent |
+| v2 (V0.2) | v3 | ajoute `museum` (6 vitrines vides, styles par défaut) et `hunts` ; **tout le reste est conservé** (exemplaires, objectifs, cosmétiques, réglages) |
+| v4+ | — | **refusé** (`FutureVersion`) : un ancien serveur n'écrase jamais un profil plus récent |
 
 ## 3. Sauvegarde (`ProfileService`, `DataStoreBackend`)
 
@@ -88,3 +89,42 @@ la capture est refusée avec un message (aucune perte silencieuse).
 | `CollectionResult` | serveur → client | réponse à un favori, un cosmétique ou un réglage |
 | `ProfileStatus` | serveur → client | état du profil |
 | `SetFavorite`, `EquipCosmetic`, `UpdateSettings` | client → serveur | demandes validées par le serveur (propriété, déblocage, types, anti-spam) |
+
+## 5. Schéma v3 : musées (V0.3)
+
+```text
+museum = {
+  slots = { specimenId | "" } × 6,      -- identifiants seulement, jamais une copie du Mimic
+  wall, lighting, pedestal, theme,      -- identifiants d'options (Config/MuseumStyles)
+}
+hunts = {
+  played, completed, best,              -- Museum Hunt : parties, réussites complètes, record
+  museums = { ["<userId>"] = lastAt },  -- musées où au moins une copie a été trouvée
+  museumOrder = { "<userId>" },         -- borné à 200 (MaxHuntMuseums)
+}
+```
+
+| Règle | Où |
+|---|---|
+| Une vitrine ne référence qu'un exemplaire **possédé** | `Collection.exhibit` (refus `NotOwned`) et `ProfileSchema.sanitize` (vitrine vidée) |
+| Un exemplaire n'est jamais dans deux vitrines | `Collection.exhibit` (`AlreadyExhibited`) et `sanitize` (doublon vidé) |
+| Exposer ne crée ni ne déplace aucun exemplaire | la vitrine ne stocke qu'un identifiant ; tests « owned / totalCaptures inchangés » |
+| Référence devenue invalide | vitrine affichée vide (`museumView`), l'exemplaire, s'il existe, reste dans la collection |
+| Style inconnu | gardé dans le profil, rendu avec l'option par défaut (`MuseumStyles.resolve`) |
+| Modifications concurrentes | verrou de session de `ProfileService` : un second serveur n'a pas de profil sûr → `ProfileUnavailable` |
+
+Les parcelles ne sont **pas** persistées : elles sont attribuées à chaque connexion
+(`PlotRegistry`), et le musée est reconstruit à partir du profil.
+
+Réseau (V0.3) :
+
+| Événement | Sens | Contenu |
+|---|---|---|
+| `RequestTravel(kind, target?)` | client → serveur | `base`, `village` ou `museum` + propriétaire ; destination choisie par le serveur |
+| `SetExhibit(slot, id?)`, `MoveExhibit(a, b)`, `SetMuseumStyle(kind, id)` | client → serveur | toujours sur la collection du demandeur |
+| `RequestMuseums` → `MuseumList` | aller-retour | statistiques publiques des musées présents |
+| `StartMuseumHunt(ownerId)` | client → serveur | lancement du défi (portée, état, délais vérifiés) |
+| `MuseumInfo`, `MuseumResult`, `HuntUpdate` | serveur → client | parcelle, résultats, déroulement du défi |
+
+Limite inchangée : le vrai DataStore n'a été validé dans aucune expérience publiée ; toute la
+persistance a été testée avec le stockage simulé (Lune) et le stockage mémoire de Studio.
