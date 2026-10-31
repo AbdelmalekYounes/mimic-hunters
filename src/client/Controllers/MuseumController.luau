@@ -79,6 +79,15 @@ local TRAVEL_ERRORS = {
 	Capturing = "Termine d'abord ta capture !",
 }
 
+-- Refus d'une modification du musée (vitrines, styles) : jamais silencieux (V0.3.1).
+local EDIT_ERRORS = {
+	AlreadyExhibited = "Ce Mimic est déjà exposé dans une autre vitrine.",
+	NotOwned = "Ce Mimic n'est pas dans ta collection.",
+	Locked = "Récompense pas encore débloquée : réussis l'objectif correspondant.",
+	ProfileUnavailable = "Sauvegarde indisponible : ton musée ne peut pas être modifié pour l'instant.",
+	RateLimited = "Un instant…",
+}
+
 function MuseumController.travel(kind: string, target: number?)
 	Audio.play("UiClick")
 	Remotes.get("RequestTravel"):FireServer(kind, target)
@@ -163,12 +172,17 @@ local function animate(dt: number)
 	table.sort(candidates, function(a, b)
 		return a.distance < b.distance
 	end)
-	lastAnimated = math.min(#candidates, MuseumController.MaxAnimated)
+	-- « Effets réduits » : les exposés restent immobiles (aucune animation).
+	local settings = ClientState.summary and ClientState.summary.settings
+	local budget = if settings and settings.reducedEffects then 0 else MuseumController.MaxAnimated
+	lastAnimated = math.min(#candidates, budget)
 	for index, item in candidates do
 		local entry = item.entry
-		if index > MuseumController.MaxAnimated then
+		if index > budget then
 			if entry.displaced then
 				entry.model:PivotTo(entry.base)
+				-- Sorti du budget en plein clignement : yeux rétablis (audit V0.3.1, C6).
+				setEyes(entry, true)
 				entry.displaced = false
 			end
 			continue
@@ -367,6 +381,7 @@ local function inOwnMuseum(): boolean
 	end
 	return false
 end
+MuseumController.inOwnMuseum = inOwnMuseum
 
 -- MA BASE : y aller ; déjà sur place, ouvre le mode décoration (onglet Musée).
 function MuseumController.base()
@@ -419,7 +434,9 @@ function MuseumController.start(hudRefs: any)
 
 	Remotes.get("MuseumResult").OnClientEvent:Connect(function(payload)
 		if not payload.ok then
-			local message = if payload.action == "travel" then TRAVEL_ERRORS[payload.reason] else nil
+			local message = if payload.action == "travel"
+				then TRAVEL_ERRORS[payload.reason]
+				else EDIT_ERRORS[payload.reason]
 			if message then
 				ClientState.toast(message)
 			end

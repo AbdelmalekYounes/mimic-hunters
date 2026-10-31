@@ -18,6 +18,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local GameConfig = require(Shared.Config.GameConfig)
 local MimicCatalog = require(Shared.Config.MimicCatalog)
 local Objectives = require(Shared.Config.Objectives)
 local Rarities = require(Shared.Config.Rarities)
@@ -276,10 +277,13 @@ local function onUpdate(payload: any)
 			endsAt = os.clock() + (payload.remaining or 75),
 		})
 		Audio.play("Reveal", 0.9)
+		-- Règles en une phrase (V0.3.1) : un seul Mimic se trahit à la fois, le scanner débusque
+		-- les autres, et examiner au hasard coûte des points.
 		ClientState.toast(
 			string.format(
-				"Trouve les %d Mimics cachés ! Scanne (E) puis examine (F) les objets du jardin.",
-				payload.total
+				"Trouve les %d Mimics ! Un seul bouge à la fois : scanne (E) pour débusquer les autres, puis examine (F). Erreur : −%d points.",
+				payload.total,
+				GameConfig.MuseumHunt.MissPenalty
 			),
 			"mimic"
 		)
@@ -296,6 +300,10 @@ local function onUpdate(payload: any)
 			active.misses = payload.misses
 			refreshStatus()
 		end
+		-- Le raté est expliqué (points perdus, courte attente) : on comprend qu'il faut chasser.
+		ClientState.toast(
+			string.format("Raté : −%d points. Suis les indices ou le scanner !", GameConfig.MuseumHunt.MissPenalty)
+		)
 	elseif phase == "end" then
 		setActive(nil)
 		showResult(payload)
@@ -367,8 +375,11 @@ function HuntController.init(hudRefs: any)
 			ClientState.toast("Cette parcelle est libre : aucun musée à explorer.")
 		end
 	end)
-	RunService.Heartbeat:Connect(function()
-		if active then
+	local statusClock = 0
+	RunService.Heartbeat:Connect(function(dt)
+		statusClock += dt
+		if active and statusClock >= 0.25 then
+			statusClock = 0
 			refreshStatus()
 		end
 	end)
