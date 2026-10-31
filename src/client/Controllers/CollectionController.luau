@@ -10,6 +10,7 @@ local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local MimicCatalog = require(Shared.Config.MimicCatalog)
+local Mutations = require(Shared.Config.Mutations)
 local Rarities = require(Shared.Config.Rarities)
 local PropBuilder = require(Shared.Builders.PropBuilder)
 local MimicModelBuilder = require(Shared.Builders.MimicModelBuilder)
@@ -20,6 +21,7 @@ local Client = script.Parent.Parent
 local ClientState = require(Client.ClientState)
 local Animate = require(Client.Util.Animate)
 local Audio = require(Client.Util.Audio)
+local MutationFx = require(Client.Util.MutationFx)
 local Theme = require(Client.UI.Theme)
 
 type Card = {
@@ -183,28 +185,73 @@ local function showDiscovery(payload: any)
 	local rarity = Rarities.get(species.rarity)
 	popupToken += 1
 	local token = popupToken
-	refs.popupHeadline.Text = if payload.isNew then "NOUVELLE ESPÈCE !" else "CAPTURÉ !"
-	refs.popupHeadline.TextColor3 = if payload.isNew then Theme.Colors.Yellow else Theme.Colors.Mint
-	refs.popupName.Text = species.name
-	refs.popupRarity.Text = if rarity then rarity.displayName else ""
-	refs.popupRarity.TextColor3 = if rarity then Theme.rgb(rarity.color) else Theme.Colors.Text
-	refs.popupCount.Text = string.format(
-		"Capturé x%d   ·   Espèces %d/%d",
-		payload.count or 1,
-		payload.discovered or 1,
-		MimicCatalog.count()
-	)
-	-- L'exemplaire réellement obtenu (couleurs et taille issues de sa graine).
+	-- L'exemplaire réellement obtenu (couleurs et taille issues de sa graine, mutation).
 	local specimen = payload.specimen
+	local mutation = if specimen then Mutations.get(specimen.mutation) else nil
+	local rare = mutation ~= nil and Mutations.isRare(mutation.id)
+	if rare and mutation then
+		refs.popupHeadline.Text = string.format("%s !", string.upper(mutation.displayName))
+		refs.popupHeadline.TextColor3 = Theme.rgb(mutation.color)
+	elseif payload.isNew then
+		refs.popupHeadline.Text = "NOUVELLE ESPÈCE !"
+		refs.popupHeadline.TextColor3 = Theme.Colors.Yellow
+	else
+		refs.popupHeadline.Text = "CAPTURÉ !"
+		refs.popupHeadline.TextColor3 = Theme.Colors.Mint
+	end
+	refs.popupName.Text = species.name
+	refs.popupRarity.Text = (if rarity then rarity.displayName else "")
+		.. (if rare and mutation then "  ·  " .. mutation.displayName else "")
+	refs.popupRarity.TextColor3 = if rare and mutation
+		then Theme.rgb(mutation.color)
+		elseif rarity then Theme.rgb(rarity.color)
+		else Theme.Colors.Text
+	if rare and mutation then
+		refs.popupCount.Text = string.format(
+			"%sChance : %s par capture",
+			if payload.isNew then "Nouvelle espèce  ·  " else "",
+			Mutations.chanceText(mutation.id)
+		)
+	else
+		refs.popupCount.Text = string.format(
+			"Possédés x%d   ·   Espèces %d/%d",
+			payload.count or 1,
+			payload.discovered or 1,
+			MimicCatalog.count()
+		)
+	end
 	local look = if specimen then SpecimenLook.compute(species, specimen.seed, specimen.mutation) else nil
 	local model = MimicModelBuilder.build(species.id, nil, look)
 	frameModel(refs.popupViewport, model, species.kind)
+	MutationFx.attach(model, look)
 	popupModel = model
 	refs.popup.Visible = true
-	refs.popupScale.Scale = 0.5
-	Animate.tween(refs.popupScale, 0.35, { Scale = 1 }, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-	Audio.play("Capture", if payload.isNew then 1.25 else 1)
-	task.delay(if payload.isNew then 3.2 else 2.2, function()
+	-- Rare : apparition plus ample et fond aux couleurs de la mutation. Nouvelle espèce : rebond doré.
+	refs.popupScale.Scale = if rare then 0.3 else 0.5
+	Animate.tween(
+		refs.popupScale,
+		if rare then 0.5 else 0.35,
+		{ Scale = 1 },
+		Enum.EasingStyle.Back,
+		Enum.EasingDirection.Out
+	)
+	local baseColor = Color3.fromRGB(36, 26, 60)
+	if rare and mutation then
+		refs.popup.BackgroundColor3 = Theme.rgb(mutation.color):Lerp(baseColor, 0.35)
+		Animate.tween(refs.popup, 1.2, { BackgroundColor3 = baseColor })
+	elseif payload.isNew then
+		refs.popup.BackgroundColor3 = Color3.fromRGB(90, 70, 30)
+		Animate.tween(refs.popup, 0.9, { BackgroundColor3 = baseColor })
+	else
+		refs.popup.BackgroundColor3 = baseColor
+	end
+	Audio.play("Capture", if rare then 1.5 elseif payload.isNew then 1.25 else 1)
+	if rare then
+		task.delay(0.25, function()
+			Audio.play("Reveal", 1.6)
+		end)
+	end
+	task.delay(if rare then 4 elseif payload.isNew then 3.2 else 2.2, function()
 		if token ~= popupToken then
 			return
 		end

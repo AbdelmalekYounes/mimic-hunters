@@ -25,6 +25,7 @@ local RunService = game:GetService("RunService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared.Config.GameConfig)
 local MimicCatalog = require(Shared.Config.MimicCatalog)
+local Mutations = require(Shared.Config.Mutations)
 local Rarities = require(Shared.Config.Rarities)
 local Rng = require(Shared.Logic.Rng)
 local Remotes = require(Shared.Net.Remotes)
@@ -43,6 +44,20 @@ local HuntServer = {}
 function HuntServer.start()
 	local seed = os.time() + math.floor(os.clock() * 1000)
 	local studio = RunService:IsStudio()
+	-- Studio uniquement : l'attribut Workspace « MH_ForceMutation » impose la prochaine mutation
+	-- (tests visuels, captures d'écran). Sans effet dans un jeu publié.
+	local mutationSource: any = Mutations
+	if studio then
+		mutationSource = {
+			roll = function(rng: any): string
+				local forced = workspace:GetAttribute("MH_ForceMutation")
+				if type(forced) == "string" and Mutations.get(forced) then
+					return forced
+				end
+				return Mutations.roll(rng)
+			end,
+		}
+	end
 	-- Identifiant de ce serveur : préfixe des clés de capture et propriétaire des verrous.
 	local serverId = if game.JobId ~= "" then game.JobId else string.format("studio-%d", seed)
 	local world = HuntWorld.new({
@@ -55,6 +70,7 @@ function HuntServer.start()
 		rng = Rng.new(seed),
 		serverId = serverId,
 		wallClock = os.time,
+		mutations = mutationSource,
 	})
 	local remotes = Remotes.setup()
 

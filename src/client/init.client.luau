@@ -5,9 +5,12 @@
 	que le client est prêt à recevoir l'état du monde.
 ]]
 
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Remotes = require(ReplicatedStorage:WaitForChild("Shared").Net.Remotes)
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local MimicCatalog = require(Shared.Config.MimicCatalog)
+local Remotes = require(Shared.Net.Remotes)
 
 local ClientState = require(script.ClientState)
 local Hud = require(script.UI.Hud)
@@ -45,6 +48,26 @@ Remotes.get("Clue").OnClientEvent:Connect(function(payload)
 end)
 Remotes.get("Notice").OnClientEvent:Connect(function(payload)
 	ClientState.toast(tostring(payload.text))
+end)
+-- L'exemplaire obtenu arrive juste avant l'état « Captured » : la révélation peut l'utiliser.
+Remotes.get("CaptureResolved").OnClientEvent:Connect(function(payload)
+	if payload.success and payload.specimen then
+		MimicVisuals.noteCapture(payload.mimicId, payload.specimen)
+	end
+end)
+-- Capture rare d'un autre joueur : annoncée à tout le serveur.
+Remotes.get("RareCapture").OnClientEvent:Connect(function(payload)
+	if payload.userId == ClientState.userId then
+		return
+	end
+	local who = Players:GetPlayerByUserId(payload.userId)
+	local species = MimicCatalog.get(payload.speciesId)
+	if who and species then
+		ClientState.toast(
+			string.format("%s a capturé un %s %s !", who.DisplayName, species.name, tostring(payload.mutation)),
+			"mimic"
+		)
+	end
 end)
 
 -- État du profil : le joueur sait toujours si ses captures seront conservées.

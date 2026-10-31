@@ -396,6 +396,14 @@ function HuntWorld._resolveSuccess(self: any, attempt: CaptureMinigame.Attempt, 
 				summary = player.inventory:summary(),
 			})
 			push(events, "_ProfileChanged", attempt.userId, { important = true })
+			if mutation ~= "Standard" then
+				-- Capture rare : annoncée à tout le serveur (de quoi la montrer).
+				push(events, "RareCapture", nil, {
+					userId = attempt.userId,
+					speciesId = record.speciesId,
+					mutation = mutation,
+				})
+			end
 		else
 			push(events, "CaptureResolved", attempt.userId, {
 				success = false,

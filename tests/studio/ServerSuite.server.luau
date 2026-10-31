@@ -286,6 +286,31 @@ local function serverSuite()
 		end
 	end)
 
+	check("mutations.modeles", function()
+		local SpecimenLook = require(Shared.Logic.SpecimenLook)
+		for _, species in MimicCatalog.list() do
+			local chroma = MimicModelBuilder.build(species.id, nil, SpecimenLook.compute(species, 11, "Chromatic"))
+			local spectral = MimicModelBuilder.build(species.id, nil, SpecimenLook.compute(species, 11, "Spectral"))
+			expect(chroma:GetAttribute("Mutation") == "Chromatic", species.id .. " : attribut Chromatic")
+			local glow = chroma.PrimaryPart and chroma.PrimaryPart:FindFirstChild("MutationGlow")
+			expect(glow ~= nil, species.id .. " : éclat Chromatic absent")
+			local wisps, translucent = 0, 0
+			for _, d in spectral:GetDescendants() do
+				if d:IsA("BasePart") then
+					if d:GetAttribute("Wisp") then
+						wisps += 1
+					elseif d:GetAttribute("Tint") and d.Transparency > 0.3 then
+						translucent += 1
+					end
+				end
+			end
+			expect(wisps == 3, species.id .. " : lueurs Spectral " .. wisps)
+			expect(translucent > 0, species.id .. " : Spectral non translucide")
+			chroma:Destroy()
+			spectral:Destroy()
+		end
+	end)
+
 	check("reseau.remote_events", function()
 		local folder = ReplicatedStorage:FindFirstChild("MimicRemotes")
 		expect(folder ~= nil, "dossier MimicRemotes absent")
@@ -421,6 +446,29 @@ local function serverSuite()
 			end, GameConfig.Hunt.RespawnDelay + 6, 0.25),
 			"population non revenue à " .. GameConfig.Hunt.ActiveMimics
 		)
+	end)
+
+	check("mutations.capture_reelle", function()
+		-- Hook Studio : impose la mutation, puis vérifie qu'elle vient bien du tirage serveur.
+		workspace:SetAttribute("MH_ForceMutation", "Chromatic")
+		local record = findHidden()
+		expect(record, "aucun Mimic caché")
+		local pos = slotPosition(record.slotId)
+		task.wait(0.6)
+		local _, inspected = world:inspect(A, pos, record.slotId, os.clock())
+		expect(inspected.result == "Mimic", "révélation : " .. tostring(inspected.result or inspected.reason))
+		local t0 = os.clock()
+		local _, started = world:startCapture(A, pos, record.id, t0)
+		expect(started.ok, "démarrage : " .. tostring(started.reason))
+		started._t0 = t0
+		local events, last = playCapture(A, pos, started, { "hit", "hit" })
+		workspace:SetAttribute("MH_ForceMutation", nil)
+		expect(last.status == "Succeeded", "capture : " .. tostring(last.status))
+		local resolved = named(events, "CaptureResolved")[1]
+		expect(resolved and resolved.payload.mutation == "Chromatic", "mutation attendue : Chromatic")
+		expect(#named(events, "RareCapture") == 1, "annonce de capture rare absente")
+		local specimen = world:inventoryOf(A):specimen(resolved.payload.specimen.id)
+		expect(specimen and specimen.mutation == "Chromatic", "exemplaire Chromatic absent de la collection")
 	end)
 
 	check("sauvegarde.cycle_studio", function()

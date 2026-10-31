@@ -70,6 +70,7 @@ function Fixtures.world(seed: number?, overrides: any?, worldOptions: any?): (an
 		wallClock = function()
 			return 1700000000
 		end,
+		mutations = Loader.shared("Config/Mutations"),
 	}
 	for k, v in worldOptions or {} do
 		options[k] = v

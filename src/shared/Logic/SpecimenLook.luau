@@ -104,7 +104,31 @@ function SpecimenLook.compute(species: any, seed: number, mutation: string?): Lo
 		glow = nil,
 		eyeGlow = nil,
 	}
+	if look.mutation == "Chromatic" then
+		-- Teinte vive tirée de la graine, accent presque complémentaire : palette « irisée ».
+		-- Le client fait ensuite glisser doucement la teinte (effet changeant).
+		local hue = rng:nextNumber()
+		look.body = SpecimenLook.hsvToRgb(hue, 0.62, 1)
+		look.accent = SpecimenLook.hsvToRgb(hue + 0.42, 0.7, 1)
+		look.glow = SpecimenLook.hsvToRgb(hue, 0.45, 1)
+	elseif look.mutation == "Spectral" then
+		-- Bleu-vert pâle à violet, translucide, yeux lumineux : mignon et un peu inquiétant.
+		local hue = 0.5 + rng:nextRange(-0.04, 0.24)
+		look.body = SpecimenLook.hsvToRgb(hue, 0.32, 0.96)
+		look.accent = SpecimenLook.hsvToRgb(0.78 + rng:nextRange(-0.05, 0.05), 0.5, 1)
+		look.eyeGlow = SpecimenLook.hsvToRgb(hue + 0.08, 0.55, 1)
+		look.transparency = 0.42
+	end
 	return look
+end
+
+--[[
+	Couleur animée d'un exemplaire Chromatic à l'instant `t` (secondes) : la teinte de base
+	glisse lentement autour du cercle chromatique. Utilisé par le client (aperçus, révélation).
+]]
+function SpecimenLook.chromaticAt(base: { number }, t: number): { number }
+	local h, s, v = SpecimenLook.rgbToHsv(base)
+	return SpecimenLook.hsvToRgb(h + t * 0.08, s, v)
 end
 
 return SpecimenLook

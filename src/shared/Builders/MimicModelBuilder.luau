@@ -218,7 +218,32 @@ local function addSpeciesDetails(model: Model, species: any, accent: Color3)
 end
 
 -- Effets propres aux mutations, appliqués après la construction (voir SpecimenLook).
-local function applyMutationLook(model: Model, look: any)
+-- Le client anime ensuite ces éléments (MutationFx) : teinte changeante, lueurs en orbite.
+local function applyMutationLook(model: Model, species: any, look: any)
+	local anchor = PropBuilder.FaceAnchors[species.kind]
+	local height = if anchor then anchor.height else 4
+	if look.mutation == "Spectral" then
+		-- Trois petites lueurs autour du Mimic (positions de départ ; l'orbite est animée).
+		for i = 1, 3 do
+			local angle = (i - 1) * math.pi * 2 / 3
+			local wisp = feature(model, {
+				Name = "Wisp",
+				Shape = Enum.PartType.Ball,
+				Size = V(0.38, 0.38, 0.38),
+				CFrame = C(math.cos(angle) * 2.2, height * (0.45 + 0.15 * i), math.sin(angle) * 2.2),
+				Color = Geometry.rgb(look.eyeGlow or look.accent),
+				Material = Enum.Material.Neon,
+				Transparency = 0.15,
+			})
+			wisp:SetAttribute("Wisp", i)
+		end
+	elseif look.mutation == "Chromatic" then
+		for _, child in model:GetDescendants() do
+			if child:IsA("BasePart") and child.Name == "Glint" then
+				child.Color = Geometry.rgb(look.glow or look.accent)
+			end
+		end
+	end
 	if look.transparency and look.transparency > 0 then
 		for _, child in model:GetDescendants() do
 			if child:IsA("BasePart") and child:GetAttribute("Tint") then
@@ -275,7 +300,7 @@ function MimicModelBuilder.build(speciesId: string, variant: number?, look: any?
 	addSpeciesDetails(model, species, accent)
 	model:SetAttribute("SpeciesId", species.id)
 	if look then
-		applyMutationLook(model, look)
+		applyMutationLook(model, species, look)
 		-- Taille de l'exemplaire, autour du pivot (posé au sol : il reste au sol).
 		if look.scale and math.abs(look.scale - 1) > 1e-3 then
 			pcall(function()

@@ -16,14 +16,17 @@ local Debris = game:GetService("Debris")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local MimicCatalog = require(Shared.Config.MimicCatalog)
+local Mutations = require(Shared.Config.Mutations)
 local Rarities = require(Shared.Config.Rarities)
 local PropBuilder = require(Shared.Builders.PropBuilder)
 local MimicModelBuilder = require(Shared.Builders.MimicModelBuilder)
+local SpecimenLook = require(Shared.Logic.SpecimenLook)
 
 local Client = script.Parent.Parent
 local ClientState = require(Client.ClientState)
 local Animate = require(Client.Util.Animate)
 local Audio = require(Client.Util.Audio)
+local MutationFx = require(Client.Util.MutationFx)
 local Theme = require(Client.UI.Theme)
 local PropTracker = require(script.Parent.PropTracker)
 
@@ -47,6 +50,8 @@ local MimicVisuals = {}
 local creatures: { [string]: Creature } = {}
 local clueBusy: { [string]: boolean } = {}
 local effects: Folder
+-- Exemplaire obtenu par mimicId, reçu (CaptureResolved) juste avant l'état « Captured ».
+local pendingSpecimens: { [string]: any } = {}
 
 local function rarityColor(speciesId: string): Color3
 	local species = MimicCatalog.get(speciesId)
@@ -437,14 +442,63 @@ local function ownerRoot(userId: number?): BasePart?
 	return if character then character:FindFirstChild("HumanoidRootPart") :: BasePart? else nil
 end
 
+--[[
+	Révélation d'une mutation (capture rare, joueur concerné uniquement) : éclair et anneau aux
+	couleurs de la mutation, le Mimic prend son apparence mutée, petit bond, puis la capture
+	continue normalement. ≈ 0,8 s de plus qu'une capture ordinaire.
+]]
+local function mutationReveal(creature: Creature, specimen: any): Model
+	local species = MimicCatalog.get(creature.speciesId)
+	local mutation = Mutations.get(specimen.mutation)
+	if species == nil or mutation == nil then
+		return creature.model
+	end
+	local old = creature.model
+	local pivot = old:GetPivot()
+	local color = Theme.rgb(mutation.color)
+	local look = SpecimenLook.compute(species, specimen.seed, specimen.mutation)
+	local model = MimicModelBuilder.build(species.id, nil, look)
+	model:PivotTo(pivot)
+	model.Parent = effects
+	old:Destroy()
+	creature.model = model
+	MutationFx.attach(model, look)
+	Audio.play("Reveal", 1.35)
+	burst(pivot.Position + Vector3.new(0, 2.5, 0), color, 60)
+	-- Anneau qui s'élargit au sol.
+	local ring = Instance.new("Part")
+	ring.Shape = Enum.PartType.Cylinder
+	ring.Anchored = true
+	ring.CanCollide = false
+	ring.CanQuery = false
+	ring.Material = Enum.Material.Neon
+	ring.Color = color
+	ring.Size = Vector3.new(0.2, 2, 2)
+	ring.CFrame = CFrame.new(pivot.Position + Vector3.new(0, 0.2, 0)) * CFrame.Angles(0, 0, math.rad(90))
+	ring.Parent = effects
+	Animate.tween(ring, 0.6, { Size = Vector3.new(0.2, 16, 16), Transparency = 1 })
+	Debris:AddItem(ring, 0.7)
+	Animate.run(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out, function(a, raw)
+		Animate.scale(model, Animate.lerp(0.7, 1.25, a))
+		model:PivotTo(pivot * C(0, math.sin(raw * math.pi) * 2.2, 0) * CFrame.Angles(0, raw * math.pi * 2, 0))
+	end)
+	task.wait(0.25)
+	return model
+end
+
 local function captureAnimation(creature: Creature, ownerUserId: number?)
 	creature.animating = true
 	creature.mode = "Leaving"
 	creature.billboard.Enabled = false
+	local mine = ownerUserId == ClientState.userId
+	local specimen = pendingSpecimens[creature.mimicId]
+	pendingSpecimens[creature.mimicId] = nil
+	if mine and specimen and Mutations.isRare(specimen.mutation) then
+		mutationReveal(creature, specimen)
+	end
 	local model = creature.model
 	local start = model:GetPivot()
 	local color = rarityColor(creature.speciesId)
-	local mine = ownerUserId == ClientState.userId
 	Animate.run(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, function(a)
 		Animate.scale(model, Animate.lerp(1, 1.3, a))
 	end)
@@ -643,6 +697,16 @@ end
 
 function MimicVisuals.effectsFolder(): Folder
 	return effects
+end
+
+-- Mémorise l'exemplaire obtenu pour la révélation (appelé sur CaptureResolved réussi).
+function MimicVisuals.noteCapture(mimicId: string, specimen: any)
+	pendingSpecimens[mimicId] = specimen
+	task.delay(10, function()
+		if pendingSpecimens[mimicId] == specimen then
+			pendingSpecimens[mimicId] = nil
+		end
+	end)
 end
 
 function MimicVisuals.start()

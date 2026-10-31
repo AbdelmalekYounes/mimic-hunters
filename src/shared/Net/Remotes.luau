@@ -39,6 +39,8 @@ Remotes.ServerToClient = table.freeze({
 	"CollectionResult",
 	-- État du profil : Ready, Unavailable, Locked, Lost, FutureVersion, Corrupt.
 	"ProfileStatus",
+	-- Capture d'un exemplaire muté, annoncée à tous les joueurs du serveur.
+	"RareCapture",
 	"TutorialUpdate",
 	"Clue",
 	"Notice",
