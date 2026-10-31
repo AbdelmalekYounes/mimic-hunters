@@ -24,6 +24,8 @@ export type Layout = {
 	codex: Rect,
 	signal: Rect,
 	capture: Rect,
+	-- Panneau Collection (codex, inventaire, objectifs) : modal, il peut recouvrir le reste.
+	panel: Rect,
 }
 
 local HudLayout = {}
@@ -127,6 +129,16 @@ function HudLayout.compute(width: number, height: number, touch: boolean): Layou
 	end
 	local capture = rect(x, y, captureW, captureH)
 
+	-- Panneau Collection : presque plein écran sur téléphone, centré et borné ailleurs.
+	local panel
+	if compact then
+		panel = rect(6, 4, width - 12, height - 8)
+	else
+		local panelW = math.min(width - 48, 940)
+		local panelH = math.min(height - 32, 640)
+		panel = rect((width - panelW) / 2, math.max(8, (height - panelH) / 2), panelW, panelH)
+	end
+
 	return {
 		mode = mode,
 		counter = counter,
@@ -137,6 +149,7 @@ function HudLayout.compute(width: number, height: number, touch: boolean): Layou
 		codex = codex,
 		signal = signal,
 		capture = capture,
+		panel = panel,
 	}
 end
 

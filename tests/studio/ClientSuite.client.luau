@@ -295,6 +295,95 @@ local function runTests(payload: any)
 		)
 	end)
 
+	-- ─── Panneau Collection (Codex, Inventaire, fiche, favori) ───────────
+	-- Modules du jeu côté client : même instance que l'interface affichée.
+	local clientRoot = player:WaitForChild("PlayerScripts"):WaitForChild("Client", 10)
+	local CollectionPanel = clientRoot and require(clientRoot.UI.CollectionPanel) :: any
+	local ClientState = clientRoot and require(clientRoot.ClientState) :: any
+	local panel = hud and hud:FindFirstChild("CollectionPanel") :: Frame
+	-- Pause courte par vue : laisse le temps aux captures d'écran de la VM (une toutes les 2 s).
+	local VIEW_PAUSE = 2.2
+
+	local function inside(child: GuiObject, parent: GuiObject): boolean
+		local p, s = child.AbsolutePosition, child.AbsoluteSize
+		local pp, ps = parent.AbsolutePosition, parent.AbsoluteSize
+		return p.X >= pp.X - 1 and p.Y >= pp.Y - 1 and p.X + s.X <= pp.X + ps.X + 1 and p.Y + s.Y <= pp.Y + ps.Y + 1
+	end
+
+	check("collection.panneau_ouvert", function()
+		expect(CollectionPanel and panel, "panneau Collection absent")
+		CollectionPanel.setOpen(true)
+		CollectionPanel.showTab("Codex")
+		task.wait(0.3)
+		expect(panel.Visible, "panneau non affiché")
+		local screen = hud.AbsoluteSize
+		local p, s = panel.AbsolutePosition, panel.AbsoluteSize
+		env.panel = string.format("%d,%d %dx%d", p.X, p.Y, s.X, s.Y)
+		expect(p.X >= 0 and p.Y >= 0 and p.X + s.X <= screen.X + 1 and p.Y + s.Y <= screen.Y + 1, "panneau hors écran")
+		local completion = panel:FindFirstChild("Completion") :: TextLabel
+		expect(
+			completion and string.find(completion.Text, "Espèces 1/6", 1, true),
+			"complétion : " .. tostring(completion and completion.Text)
+		)
+		task.wait(VIEW_PAUSE)
+	end)
+
+	check("collection.codex", function()
+		local grid = panel:FindFirstChild("CodexPage", true) :: Frame
+		expect(grid and grid.Visible, "onglet Codex non affiché")
+		local chairy = grid:FindFirstChild("chairy", true) :: GuiObject
+		local name = chairy and chairy:FindFirstChild("Name") :: TextLabel
+		expect(name and name.Text == "Chairy", "Chairy non découvert dans le codex")
+		local posty = grid:FindFirstChild("posty", true) :: GuiObject
+		local hidden = posty and posty:FindFirstChild("Name") :: TextLabel
+		expect(hidden and hidden.Text == "???", "espèce manquante affichée : " .. tostring(hidden and hidden.Text))
+		local chances = grid:FindFirstChild("Chances") :: TextLabel
+		expect(chances and string.find(chances.Text, "Chromatic 4 %", 1, true), "probabilités non affichées")
+	end)
+
+	check("collection.inventaire_et_fiche", function()
+		expect(env.specimenId, "pré-requis : exemplaire capturé")
+		CollectionPanel.showTab("Inventory")
+		CollectionPanel.select(env.specimenId)
+		task.wait(0.4)
+		local page = panel:FindFirstChild("InventoryPage", true) :: Frame
+		expect(page and page.Visible, "onglet Inventaire non affiché")
+		local detail = page:FindFirstChild("Detail") :: Frame
+		expect(detail and detail.Visible, "fiche détaillée non affichée")
+		local idLabel = detail:FindFirstChild("Id", true) :: TextLabel
+		expect(idLabel and string.find(idLabel.Text, env.specimenId, 1, true), "fiche d'un autre exemplaire")
+		local preview = detail:FindFirstChild("Preview") :: ViewportFrame
+		expect(preview and preview:FindFirstChildWhichIsA("Model") ~= nil, "aperçu 3D absent")
+		for _, name in { "Filters", "Detail" } do
+			local child = page:FindFirstChild(name) :: GuiObject
+			expect(child and inside(child, panel), name .. " déborde du panneau")
+		end
+		local grid = page:FindFirstChild("Grid") :: Frame
+		if grid.Visible then
+			expect(grid:FindFirstChild(env.specimenId) ~= nil, "carte de l'exemplaire absente de la grille")
+			local g, d = grid.AbsolutePosition, detail.AbsolutePosition
+			expect(g.X + grid.AbsoluteSize.X <= d.X + 1, "grille et fiche se chevauchent")
+		end
+		env.detailMode = if grid.Visible then "colonne" else "superposée"
+		task.wait(VIEW_PAUSE)
+	end)
+
+	check("collection.favori", function()
+		local reply = request("SetFavorite", "CollectionResult", 5, env.specimenId, true)
+		expect(reply and reply.ok, "favori refusé : " .. tostring(reply and reply.reason))
+		local deadline = os.clock() + 3
+		while os.clock() < deadline and not ClientState.specimensById[env.specimenId].favorite do
+			task.wait(0.1)
+		end
+		expect(ClientState.specimensById[env.specimenId].favorite == true, "favori non appliqué côté client")
+		local favorite = panel:FindFirstChild("Favorite", true) :: TextButton
+		expect(favorite and string.find(favorite.Text, "★", 1, true), "bouton favori non mis à jour")
+		local bad = request("SetFavorite", "CollectionResult", 5, "S1-999999", true)
+		expect(bad and not bad.ok and bad.reason == "NotOwned", "favori d'un exemplaire non possédé accepté")
+		task.wait(VIEW_PAUSE)
+		CollectionPanel.setOpen(false)
+	end)
+
 	bus:FireServer("report", { results = results, env = env, capturedSpecies = capturedSpecies })
 end
 

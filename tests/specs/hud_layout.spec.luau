@@ -37,7 +37,7 @@ describe("HudLayout", function()
 		end)
 
 		it(screen.name .. " : tout tient dans l'écran", function()
-			for _, key in { "counter", "banner", "action", "scan", "codex", "signal", "capture" } do
+			for _, key in { "counter", "banner", "action", "scan", "codex", "signal", "capture", "panel" } do
 				local r = layout[key]
 				if not HudLayout.inside(r, screen.w, screen.h) then
 					error(key .. " sort de l'écran " .. describeRect(r), 0)
