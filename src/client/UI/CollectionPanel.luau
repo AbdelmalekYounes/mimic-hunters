@@ -256,12 +256,15 @@ local function buildCodexPage(): Frame
 			FillDirection = Enum.FillDirection.Horizontal,
 			Padding = UDim.new(0, 6),
 			VerticalAlignment = Enum.VerticalAlignment.Center,
+			-- Ordre de rareté (Standard, Chromatic, Spectral), pas l'ordre alphabétique.
+			SortOrder = Enum.SortOrder.LayoutOrder,
 			Parent = dots,
 		})
 		local dotFrames = {}
 		for _, mutation in Mutations.list() do
 			local dot = Theme.create("Frame", {
 				Name = mutation.id,
+				LayoutOrder = mutation.order,
 				Size = UDim2.new(0, 0, 1, 0),
 				SizeConstraint = Enum.SizeConstraint.RelativeYY,
 				BackgroundColor3 = Color3.fromRGB(60, 50, 80),

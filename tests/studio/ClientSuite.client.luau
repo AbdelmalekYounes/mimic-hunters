@@ -367,9 +367,8 @@ local function runTests(payload: any)
 	-- ─── Capture rare par le réseau (révélation de mutation) ──────────────
 	check("e2e.capture_mutation", function()
 		-- PC : Chromatic ; mobile simulé : Spectral (les deux apparaissent dans les captures d'écran).
-		local wanted = if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
-			then "Spectral"
-			else "Chromatic"
+		-- Appareil déclaré par le pilote : la détection tactile peut être lue avant la simulation.
+		local wanted = if payload and payload.device and payload.device ~= "pc" then "Spectral" else "Chromatic"
 		local ready = nil
 		local conn = bus.OnClientEvent:Connect(function(kind, data)
 			if kind == "mutation_ready" then
