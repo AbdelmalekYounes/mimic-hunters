@@ -46,7 +46,7 @@ puis vérification sur **la version installée** avec `RobloxStudioBeta.exe --fu
 
 | Catégorie | Outil / API | Disponible ? | Niveau de sécurité (dump API local) | Utilisé |
 |---|---|---|---|---|
-| 1. Ligne de commande | Lune, Selene, StyLua, Rojo | ✅ | — | ✅ |
+| 1. Ligne de commande | Lune, Selene, luau-lsp (types), StyLua, Rojo | ✅ | — | ✅ |
 | 2. Studio scripté | `--task RunScript` + `--localPlaceFile` + `--runScriptFile` + `--outputFile` + `--quitAfterExecution` | ✅ | « permissions de la barre de commande » | ✅ |
 | 3a. Sessions de test | `StudioTestService.ExecuteRunModeAsync` / `ExecutePlayModeAsync` / `ExecuteMultiplayerTestAsync` | ✅ depuis RunScript | PluginSecurity | ✅ |
 | 3b. Fin / arguments / joueurs | `EndTest`, `GetTestArgs`, `AddPlayers`, `LeaveTest`, `CanLeaveTest` | ✅ | None (dans une session) | ✅ |

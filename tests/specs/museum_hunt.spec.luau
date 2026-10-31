@@ -394,3 +394,68 @@ describe("Museum Hunt — départs et anti-abus", function()
 		expect(limited).toBeAtLeast(17)
 	end)
 end)
+
+describe("Museum Hunt — correctifs de l'audit V0.3.1", function()
+	it("envoie les objets triés par cachette : l'ordre ne désigne jamais les copies", function()
+		for seed = 130, 140 do
+			local _, core = setup(seed)
+			local events = start(core)
+			local props = named(events, "_HuntSpawn")[1].payload.props
+			for i = 2, #props do
+				expect(props[i].spot > props[i - 1].spot).toBe(true)
+			end
+		end
+	end)
+
+	it("donne aux leurres les types d'objet des copies", function()
+		for seed = 130, 140 do
+			local _, core = setup(seed)
+			start(core)
+			local hunt = session(core)
+			local copyKinds = {}
+			for _, entry in hunt.props do
+				if entry.copy then
+					copyKinds[entry.kind] = true
+				end
+			end
+			for _, entry in hunt.props do
+				expect(copyKinds[entry.kind]).toBe(true)
+			end
+		end
+	end)
+
+	it("applique le délai entre deux défis après une sortie du jardin", function()
+		local _, core = setup()
+		start(core, 1)
+		local zone = MuseumLayout.toWorld(core:plotOf(OWNER), MuseumLayout.HuntZone.center)
+		core:tick(4, { [VISITOR] = { X = zone.X + RULES.ZoneRadius + 5, Y = 0, Z = zone.Z } })
+		local _, reply = start(core, 6)
+		expect(reply.reason).toBe("Cooldown")
+		_, reply = start(core, 4 + RULES.RepeatCooldown + 1)
+		expect(reply.ok).toBe(true)
+	end)
+
+	it("refuse un musée sans vitrine, sans jamais révéler la collection privée", function()
+		local world, core = setup()
+		-- OTHER possède des Mimics mais n'en expose aucun.
+		world:addPlayer(OTHER, 0, profileWith(OTHER, { { "chairy" }, { "posty", "Spectral" } }, false))
+		core:join(OTHER, 0)
+		local events, reply = core:startHunt(VISITOR, OTHER, signOf(core, OTHER), 1)
+		expect(reply.reason).toBe("EmptyMuseum")
+		expect(#named(events, "_HuntSpawn")).toBe(0)
+	end)
+
+	it("limite aussi les requêtes hors défi", function()
+		local _, core = setup()
+		-- Limites réelles (les tests fonctionnels les assouplissent).
+		core._limiter = Loader.server("Core/RateLimiter").new(Fixtures.GameConfig.RateLimits)
+		local limited = false
+		for i = 1, 20 do
+			local _, reply = core:huntInspect(VISITOR, signOf(core, OWNER), "MH1-1", 1 + i * 0.01)
+			if reply.reason == "RateLimited" then
+				limited = true
+			end
+		end
+		expect(limited).toBe(true)
+	end)
+end)

@@ -105,24 +105,31 @@ et lancez `luau-lsp analyze` avec les définitions Roblox et un `sourcemap.json`
 ```
 src/
   shared/              → ReplicatedStorage.Shared (client + serveur)
-    Config/            GameConfig, MimicCatalog, Rarities, Sounds
-    Logic/             CaptureMinigame, Rng, WeightedPicker, Validation (pur)
+    Config/            GameConfig, MimicCatalog, Rarities, Mutations, Objectives,
+                       MuseumStyles, Sounds
+    Logic/             CaptureMinigame, CollectionQuery, HudLayout, SpecimenLook,
+                       Rng, WeightedPicker, Validation (pur)
     Builders/          Geometry, PropBuilder, MimicModelBuilder (Parts uniquement)
     Net/Remotes        noms et création des RemoteEvents
   server/              → ServerScriptService.Server
     init.server.luau   point d'entrée
     Core/              logique serveur PURE et testée : HuntWorld, MimicStateMachine,
-                       EncounterGenerator, CaptureLedger, RewardValidator,
-                       SessionInventory, RateLimiter, TutorialFlow
-    Map/               MapLayout (données), MapBuilder (génération), LightingSetup
-    Services/          HuntServer (adaptateur Roblox), MemoryProfileStore
+                       EncounterGenerator, CaptureLedger, RewardValidator, RateLimiter,
+                       TutorialFlow, Collection, ProfileSchema, ProfileService,
+                       MemoryBackend, MuseumCore, PlotRegistry
+    Map/               MapLayout, MapBuilder, MuseumLayout, MuseumBuilder, LightingSetup
+    Services/          HuntServer (adaptateur Roblox), MuseumServer, DataStoreBackend
   client/              → StarterPlayerScripts.Client
-    Controllers/       PropTracker, MimicVisuals, ScannerController,
-                       CaptureController, CollectionController, TutorialController
-    UI/                Theme, Hud (interface construite en code)
-    Util/              Signal, Animate, Audio
-tests/                 Lune : run.luau, check.luau, lib/, specs/
-docs/                  GAME_DESIGN, ARCHITECTURE, ROADMAP, V01_VALIDATION, screenshots/
+    Controllers/       PropTracker, MimicVisuals, ScannerController, CaptureController,
+                       CollectionController, TutorialController, TitleController,
+                       MuseumController, HuntController
+    UI/                Theme, Hud, CollectionPanel, ModelView, ObjectivesTab,
+                       MuseumTab, VisitsTab (interface construite en code)
+    Util/              Signal, Animate, Audio, MutationFx
+tests/                 Lune : run.luau, check.luau, lib/, specs/ ; Studio : tests/studio/
+tools/                 test-all, studio-tests, luau-analyze, VM (vm-*.ps1)
+docs/                  GAME_DESIGN, ARCHITECTURE, DATA_SCHEMA, TESTING, ROADMAP,
+                       V01/V02/V03(/V031)_VALIDATION, PLAYTEST_PLAN, screenshots/
 ```
 
 ## Documentation
@@ -134,6 +141,7 @@ docs/                  GAME_DESIGN, ARCHITECTURE, ROADMAP, V01_VALIDATION, scree
 - [docs/V02_VALIDATION.md](docs/V02_VALIDATION.md) — bilan de la V0.2 (sauvegardes, collection, mutations, objectifs)
 - [docs/DATA_SCHEMA.md](docs/DATA_SCHEMA.md) — schéma du profil, migrations, sauvegarde et verrou de session
 - [docs/V03_VALIDATION.md](docs/V03_VALIDATION.md) — bilan de la V0.3 (musées, visites, Museum Hunt)
+- [docs/V031_AUDIT.md](docs/V031_AUDIT.md) — audit technique V0.3.1 (persistance, sécurité, performances, types)
 - [docs/TESTING.md](docs/TESTING.md) — tests automatisés Studio sans monopoliser le PC
 - [docs/VM_SETUP.md](docs/VM_SETUP.md) — VM VMware pour les tests graphiques (`test-vm.cmd`)
 

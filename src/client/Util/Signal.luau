@@ -25,7 +25,8 @@ function Signal.Connect(self: any, fn: (...any) -> ()): Connection
 end
 
 function Signal.Fire(self: any, ...: any)
-	for _, handler in table.clone(self._handlers) do
+	local handlers: { { fn: (...any) -> (), connected: boolean } } = table.clone(self._handlers)
+	for _, handler in handlers do
 		if handler.connected then
 			task.spawn(handler.fn, ...)
 		end

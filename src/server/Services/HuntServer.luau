@@ -76,6 +76,10 @@ function HuntServer.start()
 		mutations = mutationSource,
 		objectives = Objectives.list(),
 		cosmeticDefaults = Objectives.defaults(),
+		cosmeticKind = function(id: string): string?
+			local cosmetic = Objectives.cosmetic(id)
+			return if cosmetic then cosmetic.kind else nil
+		end,
 		museumStyles = MuseumStyles,
 	})
 	local remotes = Remotes.setup()
@@ -176,7 +180,7 @@ function HuntServer.start()
 					)
 				)
 			end
-			local remote = remotes[event.name]
+			local remote: RemoteEvent? = remotes[event.name]
 			if remote == nil then
 				warn("[HuntServer] RemoteEvent inconnu :", event.name)
 				continue
@@ -215,7 +219,7 @@ function HuntServer.start()
 	end
 
 	-- Une erreur dans un gestionnaire ne doit jamais casser la boucle de jeu.
-	local function guarded(name: string, handler: (...any) -> ())
+	local function guarded(name: string, handler: (...any) -> ...any)
 		return function(...)
 			local ok, err = pcall(handler, ...)
 			if not ok then

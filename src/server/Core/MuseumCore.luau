@@ -144,11 +144,12 @@ function MuseumCore._ownRequest(
 	if collection == nil then
 		return reply({ ok = false, reason = "UnknownPlayer" })
 	end
-	if not self:_ready(userId) then
-		return reply({ ok = false, reason = "ProfileUnavailable" })
-	end
+	-- Anti-spam avant tout autre refus : même un profil indisponible ne répond pas sans limite.
 	if not self._limiter:allow(userId, "Museum", now) then
 		return reply({ ok = false, reason = "RateLimited" })
+	end
+	if not self:_ready(userId) then
+		return reply({ ok = false, reason = "ProfileUnavailable" })
 	end
 	local ok, result = apply(collection)
 	if not ok then
@@ -191,7 +192,7 @@ end
 -- Musées des joueurs présents : statistiques publiques seulement.
 function MuseumCore.list(self: any, userId: number, now: number): ({ Event }, any)
 	local events = {}
-	if not self._limiter:allow(userId, "Museum", now) then
+	if not self._limiter:allow(userId, "MuseumList", now) then
 		local payload = { ok = false, reason = "RateLimited" }
 		push(events, "MuseumList", userId, payload)
 		return events, payload
@@ -234,6 +235,11 @@ function MuseumCore.travel(self: any, userId: number, kind: any, target: any, no
 	end
 	if not self._limiter:allow(userId, "Travel", now) then
 		return reply({ ok = false, reason = "RateLimited" })
+	end
+	-- Pas de téléportation au milieu d'une capture : le minijeu échouerait hors de portée et
+	-- le Mimic resterait verrouillé jusqu'au délai de la tentative (audit V0.3.1).
+	if self._world.isCapturing and self._world:isCapturing(userId) then
+		return reply({ ok = false, reason = "Capturing" })
 	end
 	if kind == "village" then
 		push(events, "_Teleport", userId, { userId = userId, point = "village" })
@@ -348,8 +354,13 @@ function MuseumCore._finishHunt(self: any, events: { Event }, hunt: any, now: nu
 	})
 end
 
-function MuseumCore._cancelHunt(_self: any, events: { Event }, hunt: any, reason: string)
+function MuseumCore._cancelHunt(self: any, events: { Event }, hunt: any, reason: string, now: number?)
 	hunt.status = "Cancelled"
+	-- Quitter le jardin ne doit pas permettre de relancer aussitôt pour obtenir une nouvelle
+	-- disposition : le délai entre deux défis s'applique (audit V0.3.1).
+	if reason == "LeftZone" and now then
+		self._lastHuntEnd[hunt.visitorId] = now
+	end
 	push(events, "_HuntDespawn", nil, { huntId = hunt.id, plot = hunt.plot })
 	push(events, "HuntUpdate", hunt.visitorId, { phase = "cancel", huntId = hunt.id, reason = reason })
 end
@@ -441,6 +452,9 @@ function MuseumCore.startHunt(self: any, visitorId: number, ownerId: any, positi
 		scanReadyAt = -math.huge,
 		inspectReadyAt = -math.huge,
 	}
+	-- Types d'objet des copies : les leurres les reprennent, pour qu'un coup d'œil sur les
+	-- espèces exposées ne suffise pas à éliminer les leurres (audit V0.3.1).
+	local copyKinds = {}
 	local props = {}
 	for order, spot in spots do
 		local propId = string.format("%s-%d", huntId, spot)
@@ -455,10 +469,13 @@ function MuseumCore.startHunt(self: any, visitorId: number, ownerId: any, positi
 				rarity = source.rarity,
 			}
 			entry.kind = if species then species.kind else "Chair"
+			table.insert(copyKinds, entry.kind)
 			entry.clues = if species then species.behavior.clues else { "Wiggle" }
 			entry.nextClueAt = now + rng:nextRange(1.5, rules.ClueIntervalMax)
 		else
-			entry.kind = PROP_KINDS[rng:nextInteger(1, #PROP_KINDS)]
+			-- Les copies passent en premier dans la boucle : copyKinds est déjà rempli.
+			local pool = if #copyKinds > 0 then copyKinds else PROP_KINDS
+			entry.kind = pool[rng:nextInteger(1, #pool)]
 		end
 		entry.variant = rng:nextInteger(1, 2)
 		hunt.props[propId] = entry
@@ -466,6 +483,11 @@ function MuseumCore.startHunt(self: any, visitorId: number, ownerId: any, positi
 		table.insert(props, { propId = propId, spot = spot, kind = entry.kind, variant = entry.variant })
 	end
 	self._hunts[huntId] = hunt
+	-- Les copies ont été tirées en premier : on envoie les objets triés par cachette, sinon
+	-- l'ordre de création (ou de réplication) des modèles désignerait les copies (audit V0.3.1).
+	table.sort(props, function(a, b)
+		return a.spot < b.spot
+	end)
 	push(events, "_HuntSpawn", nil, { huntId = huntId, plot = plot, props = props })
 	push(events, "HuntUpdate", ownerId, { phase = "visitorStart", visitorId = visitorId })
 	return reply({
@@ -488,12 +510,12 @@ function MuseumCore.huntScan(self: any, visitorId: number, position: any, now: n
 		push(events, "ScanResult", visitorId, payload)
 		return events, payload
 	end
+	if not self._limiter:allow(visitorId, "Hunt", now) then
+		return reply({ ok = false, reason = "RateLimited" })
+	end
 	local hunt = self:huntOf(visitorId)
 	if hunt == nil then
 		return reply({ ok = false, reason = "NoHunt" })
-	end
-	if not self._limiter:allow(visitorId, "Hunt", now) then
-		return reply({ ok = false, reason = "RateLimited" })
 	end
 	if now < hunt.scanReadyAt then
 		return reply({ ok = false, reason = "Cooldown", remaining = hunt.scanReadyAt - now })
@@ -532,12 +554,12 @@ function MuseumCore.huntInspect(self: any, visitorId: number, position: any, pro
 		push(events, "InspectResult", visitorId, payload)
 		return events, payload
 	end
+	if not self._limiter:allow(visitorId, "Hunt", now) then
+		return reply({ ok = false, reason = "RateLimited" })
+	end
 	local hunt = self:huntOf(visitorId)
 	if hunt == nil then
 		return reply({ ok = false, reason = "NoHunt" })
-	end
-	if not self._limiter:allow(visitorId, "Hunt", now) then
-		return reply({ ok = false, reason = "RateLimited" })
 	end
 	local entry = if type(propId) == "string" then hunt.props[propId] else nil
 	if entry == nil or entry.found then
@@ -611,7 +633,7 @@ function MuseumCore.tick(self: any, now: number, positions: { [number]: any }): 
 		local position = positions[hunt.visitorId]
 		local zone = self._layout.toWorld(hunt.plot, self._layout.HuntZone.center)
 		if position and flatDistance(position, zone) > rules.ZoneRadius then
-			self:_cancelHunt(events, hunt, "LeftZone")
+			self:_cancelHunt(events, hunt, "LeftZone", now)
 			continue
 		end
 		for _, entry in hunt.props do

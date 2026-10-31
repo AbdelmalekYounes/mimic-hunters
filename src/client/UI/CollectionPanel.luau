@@ -68,7 +68,7 @@ local function mutationColor(id: string): Color3
 end
 
 local function formatDate(timestamp: number): string
-	local ok, t = pcall(os.date, "*t", timestamp)
+	local ok, t = pcall(os.date :: any, "*t", timestamp)
 	if not ok or type(t) ~= "table" then
 		return "?"
 	end
@@ -578,7 +578,7 @@ local function makeCard(specimen: any, order: number): TextButton
 		Name = "Mutation",
 		Text = if rare and mutation
 			then mutation.displayName
-			else (Rarities.get(specimen.rarity) or {}).displayName or "",
+			else (Rarities.get(specimen.rarity) or {} :: any).displayName or "",
 		Font = Theme.Fonts.Bold,
 		TextColor3 = if rare then mutationColor(specimen.mutation) else rarityColor(specimen.rarity),
 		Size = UDim2.new(1, -8, 0.12, 0),

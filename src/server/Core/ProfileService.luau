@@ -178,7 +178,11 @@ end
 	table où la transformation range son résultat (la dernière exécution fait foi).
 	Retourne (ok, outcome?, record?).
 ]]
-function ProfileService._update(self: any, key: string, transform: (any, any) -> any): (boolean, string?, any)
+function ProfileService._update(
+	self: any,
+	key: string,
+	transform: (any, any) -> (any, string?)
+): (boolean, string?, any)
 	local config = self._config
 	local delay = config.RetryBase
 	for attempt = 1, config.MaxRetries do

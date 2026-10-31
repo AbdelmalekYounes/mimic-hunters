@@ -7,9 +7,10 @@
 	  1. Lune   : vérification de syntaxe de tous les fichiers .luau   (CLI)
 	  2. Lune   : tests unitaires et d'intégration de la logique pure  (CLI)
 	  3. Selene : lint de src (std roblox) et de tests (std luau)      (CLI)
-	  4. StyLua : vérification du formatage                            (CLI)
-	  5. Rojo   : construction de la place                             (CLI)
-	  6. Studio : sessions Run / Play / Play mobile / Multijoueur      (Studio scripté, bureau caché)
+	  4. Luau   : analyse de types --!strict (luau-lsp)                (CLI)
+	  5. StyLua : vérification du formatage                            (CLI)
+	  6. Rojo   : construction de la place                             (CLI)
+	  7. Studio : sessions Run / Play / Play mobile / Multijoueur      (Studio scripté, bureau caché)
 
 	Produit build/test-reports/<horodatage>/report.md + report.json,
 	et une copie build/test-reports/latest.md.
@@ -88,6 +89,7 @@ Add-Step "Selene : src" "CLI" "selene" "src" $Root { param($o) (Last-Line $o "\d
 Add-Step "Selene : tests" "CLI" "selene" "." (Join-Path $Root "tests") { param($o) (Last-Line $o "\d+ errors") + " / " + (Last-Line $o "\d+ warnings") }
 Add-Step "Selene : suites Studio" "CLI" "selene" "tests/studio" $Root { param($o) (Last-Line $o "\d+ errors") + " / " + (Last-Line $o "\d+ warnings") }
 Add-Step "Lune : syntaxe suites Studio" "CLI" "lune" "run tests/check tests/studio" $Root { param($o) Last-Line $o "\d+ fichier\(s\) compilé\(s\), \d+ erreur\(s\)" }
+Add-Step "Luau : analyse de types" "CLI" "powershell" "-NoProfile -ExecutionPolicy Bypass -File tools/luau-analyze.ps1" $Root { param($o) Last-Line $o "\d+ erreur\(s\) de type" }
 Add-Step "StyLua : formatage" "CLI" "stylua" "--check src tests" $Root { param($o) if ($o.Trim()) { "écarts de formatage" } else { "conforme" } }
 Add-Step "Rojo : construction" "CLI" "rojo" "build default.project.json -o build/MimicHunters.rbxl" $Root { param($o) Last-Line $o "Built project to .*" }
 
@@ -133,7 +135,7 @@ $context = [ordered]@{
 	os = (Get-CimInstance Win32_OperatingSystem).Caption
 	gpu = ((Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name }) -join ", ")
 	commit = $git + $(if ($dirty) { " (modifications non commitées)" } else { "" })
-	lune = Tool-Version "lune"; rojo = Tool-Version "rojo"; selene = Tool-Version "selene"; stylua = Tool-Version "stylua"
+	lune = Tool-Version "lune"; rojo = Tool-Version "rojo"; selene = Tool-Version "selene"; stylua = Tool-Version "stylua"; luauLsp = Tool-Version "luau-lsp"
 	studioVersion = if ($studio) { $studio.studioVersion } else { "non exécuté" }
 	studioExe = if ($studio) { $studio.studioExe } else { "" }
 	screen = (Get-CimInstance Win32_VideoController | Where-Object { $_.CurrentHorizontalResolution } | ForEach-Object { "$($_.CurrentHorizontalResolution)x$($_.CurrentVerticalResolution)" }) -join ", "

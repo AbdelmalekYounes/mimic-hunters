@@ -209,15 +209,15 @@ function MuseumBuilder.buildPlot(index: number, parent: Instance): PlotRefs
 	-- Liserés néon en haut des murs.
 	for _, spec in
 		{
-			{ C(0, h + 0.15, room.maxZ), V(width + 1, 0.3, 1.2) },
-			{ C(room.minX, h + 0.15, midZ), V(1.2, 0.3, depth) },
-			{ C(room.maxX, h + 0.15, midZ), V(1.2, 0.3, depth) },
-			{ C(0, h + 0.15, room.minZ), V(width + 1, 0.3, 1.2) },
+			{ cf = C(0, h + 0.15, room.maxZ), size = V(width + 1, 0.3, 1.2) },
+			{ cf = C(room.minX, h + 0.15, midZ), size = V(1.2, 0.3, depth) },
+			{ cf = C(room.maxX, h + 0.15, midZ), size = V(1.2, 0.3, depth) },
+			{ cf = C(0, h + 0.15, room.minZ), size = V(width + 1, 0.3, 1.2) },
 		}
 	do
 		table.insert(
 			trims,
-			part(model, "Trim", frame * spec[1], spec[2], Color3.fromRGB(255, 120, 186), {
+			part(model, "Trim", frame * spec.cf, spec.size, Color3.fromRGB(255, 120, 186), {
 				Material = Enum.Material.Neon,
 				CastShadow = false,
 			})
@@ -435,7 +435,7 @@ function MuseumBuilder.renderExhibits(refs: PlotRefs, slots: { any }, ownerName:
 		local base = refs.pedestals[slot]
 		local species = specimen and MimicCatalog.get(specimen.speciesId)
 		-- Vitrine vide (false) ou espèce disparue : rien à poser.
-		if base == nil or not species then
+		if not base or not species then
 			continue
 		end
 		local look = SpecimenLook.compute(species, specimen.seed, specimen.mutation)

@@ -91,6 +91,7 @@ function HuntWorld.new(options: any)
 	self._objectives = options.objectives or {}
 	self._mutations = options.mutations
 	self._cosmeticDefaults = options.cosmeticDefaults or {}
+	self._cosmeticKind = options.cosmeticKind
 	self._museumStyles = options.museumStyles
 	self._slotList = {} :: { Slot }
 	self._slots = {} :: { [string]: Slot }
@@ -231,7 +232,7 @@ end
 
 function HuntWorld._tutorialEvent(self: any, player: PlayerState, event: string, events: { Event }, _now: number)
 	local before = player.tutorialStep
-	local after = TutorialFlow.advance(before, event)
+	local after: TutorialFlow.Step = TutorialFlow.advance(before :: any, event) :: any
 	if after == before then
 		return
 	end
@@ -459,6 +460,7 @@ function HuntWorld._newCollection(self: any, userId: number, profile: ProfileSch
 		objectives = self._objectives,
 		defaults = self._cosmeticDefaults,
 		museumStyles = self._museumStyles,
+		cosmeticKind = self._cosmeticKind,
 	})
 	-- Rattrapage : un objectif ajouté après coup est validé dès la connexion s'il est déjà atteint.
 	collection:evaluateObjectives()
@@ -659,11 +661,12 @@ function HuntWorld._collectionRequest(
 	if player == nil then
 		return reply({ ok = false, reason = "UnknownPlayer" })
 	end
-	if not player.ready then
-		return reply({ ok = false, reason = "ProfileUnavailable" })
-	end
+	-- Anti-spam avant le refus « profil indisponible » (sinon réponses illimitées).
 	if not self._limiter:allow(userId, "Collection", now) then
 		return reply({ ok = false, reason = "RateLimited" })
+	end
+	if not player.ready then
+		return reply({ ok = false, reason = "ProfileUnavailable" })
 	end
 	local ok, result = apply(player)
 	if not ok then
@@ -996,11 +999,13 @@ function HuntWorld.pulse(
 		stage = if result.stage then CaptureMinigame.publicStage(result.stage) else nil,
 	})
 
-	if attempt.status == "Succeeded" then
+	-- Le statut vient d'être modifié par le minijeu : relu sans le rétrécissement de type.
+	local status: string = attempt.status
+	if status == "Succeeded" then
 		self:_resolveSuccess(attempt, now, events)
-	elseif attempt.status == "Failed" then
+	elseif status == "Failed" then
 		self:_resolveFailure(attempt, now, events, "Escaped")
-	elseif attempt.status == "Expired" then
+	elseif status == "Expired" then
 		self:_resolveFailure(attempt, now, events, "Timeout")
 	end
 	return events, payload
@@ -1144,6 +1149,11 @@ function HuntWorld.sharedMimics(self: any): { MimicStateMachine.Record }
 		return a.id < b.id
 	end)
 	return out
+end
+
+-- Vrai si le joueur a une tentative de capture en cours (minijeu ouvert).
+function HuntWorld.isCapturing(self: any, userId: number): boolean
+	return self._ledger:activeFor(userId) ~= nil
 end
 
 function HuntWorld.inventoryOf(self: any, userId: number): any

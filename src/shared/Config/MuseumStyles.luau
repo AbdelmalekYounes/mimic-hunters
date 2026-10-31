@@ -82,7 +82,8 @@ function MuseumStyles.options(kind: string): { Option }
 end
 
 function MuseumStyles.get(kind: string, id: string?): Option?
-	for _, option in Styles[kind] or {} do
+	local options: { Option } = Styles[kind] or {}
+	for _, option in options do
 		if option.id == id then
 			return option
 		end

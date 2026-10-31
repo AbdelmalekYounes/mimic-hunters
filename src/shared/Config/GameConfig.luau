@@ -93,6 +93,9 @@ local GameConfig = {
 		Collection = { capacity = 8, refillPerSecond = 3 },
 		-- Musées (V0.3) : vitrines et styles, déplacements rapides, Museum Hunt.
 		Museum = { capacity = 8, refillPerSecond = 2 },
+		-- Liste des musées (onglet Visites) : seau séparé, pour qu'une rafale de rafraîchissements
+		-- ne bloque jamais l'exposition ou la personnalisation (audit V0.3.1).
+		MuseumList = { capacity = 4, refillPerSecond = 1 },
 		Travel = { capacity = 3, refillPerSecond = 0.5 },
 		Hunt = { capacity = 6, refillPerSecond = 3 },
 	},

@@ -1,4 +1,4 @@
-# MIMIC HUNTERS — Architecture et choix techniques (V0.3)
+# MIMIC HUNTERS — Architecture et choix techniques (V0.3.1)
 
 ## 1. Principe directeur
 
@@ -20,8 +20,10 @@ en millisecondes, avec une horloge et une graine aléatoire contrôlées.
                                         HuntWorld (pur)  ──▶ events {name, userId?, payload}
  MimicVisuals   ◀── MimicUpdate / Clue ─┤   ├ MimicStateMachine   ├ CaptureLedger
  CaptureController ◀── PulseResult … ───┤   ├ EncounterGenerator  ├ RewardValidator
- CollectionController ◀── Inventory… ───┘   ├ CaptureMinigame     ├ SessionInventory
-                                            ├ RateLimiter         └ TutorialFlow
+ CollectionController ◀── Collection… ──┤   ├ CaptureMinigame     ├ Collection (profil)
+ MuseumController ◀── MuseumInfo … ─────┤   ├ RateLimiter         └ TutorialFlow
+ HuntController   ◀── HuntUpdate ───────┘ MuseumCore (pur) : parcelles, vitrines, Museum Hunt
+                                        ProfileService ──▶ DataStoreBackend | MemoryBackend
 ```
 
 ## 2. Séparation des responsabilités
@@ -33,7 +35,8 @@ en millisecondes, avec une horloge et une graine aléatoire contrôlées.
 | Interactions et récompenses (serveur) | `server/Core/HuntWorld`, `MimicStateMachine`, `CaptureLedger`, `RewardValidator` |
 | Détection (client) | `client/Controllers/ScannerController`, `MimicVisuals` (indices) |
 | Minijeu | `shared/Logic/CaptureMinigame` (règles), `client/Controllers/CaptureController` (affichage) |
-| Inventaire de session | `server/Core/SessionInventory`, `server/Services/MemoryProfileStore` |
+| Collection et sauvegarde | `server/Core/Collection`, `ProfileSchema`, `ProfileService`, `MemoryBackend`, `server/Services/DataStoreBackend` |
+| Musées et Museum Hunt | `server/Core/MuseumCore`, `PlotRegistry`, `server/Map/MuseumLayout`, `MuseumBuilder`, `server/Services/MuseumServer` |
 | Interface | `client/UI/Theme`, `Hud` (positions calculées par `shared/Logic/HudLayout`, pur et testé), `CollectionController`, `TutorialController` |
 | Génération de la carte | `server/Map/MapLayout` (données), `MapBuilder`, `LightingSetup`, `shared/Builders/*` |
 
@@ -82,7 +85,7 @@ plafond de 12 impulsions), ni dépasser le délai de la tentative.
 | Captures simultanées incohérentes | Verrou `ownerId`, une tentative active par joueur (`CaptureLedger`) | `interactions simultanées` |
 | Objets inexistants / données invalides | `Validation.isId` (motif, longueur), types vérifiés, ids inconnus refusés | `rejette les données invalides` |
 | Tentatives répétées | Statut de tentative terminal, `Resolved` sur rejeu | `ne duplique jamais une récompense` |
-| Attribution multiple d'une récompense | `CaptureLedger:markRewarded` + `SessionInventory:add` idempotent par `attemptId` + `RewardValidator` | `rewards.spec` |
+| Attribution multiple d'une récompense | `CaptureLedger:markRewarded` + `Collection:grant` idempotent par clé de capture persistante (`JobId:tentative`) + `RewardValidator` | `rewards.spec`, `collection.spec`, `persistence.spec` |
 | Manipulation du résultat côté client | Le client n'envoie jamais de résultat ; temps borné (§4) ; fenêtre de latence elle-même bornée | `capture.spec › anti-triche`, `ignore un faux temps de latence` |
 | Fuite d'information | Le client ne reçoit jamais la liste des Mimics cachés ; les ids de Mimic ne sont pas dérivés des objets ; indices limités aux joueurs proches | `envoie l'état initial`, `indices uniquement aux joueurs proches` |
 | Gestionnaire qui plante | Chaque handler serveur est enveloppé dans `pcall` (`guarded`) | — (revue de code) |
@@ -93,7 +96,7 @@ Détail complet : [DATA_SCHEMA.md](DATA_SCHEMA.md).
 
 | Module | Rôle | Testé |
 |---|---|---|
-| `Core/ProfileSchema` | profil v2, migration depuis la V0.1, réparation, versions futures refusées | Lune |
+| `Core/ProfileSchema` | profil v3, migrations v1 → v2 → v3, réparation, versions futures refusées | Lune |
 | `Core/Collection` | exemplaires individuels, idempotence par clé de capture, codex, favoris, objectifs, cosmétiques, réglages | Lune + Studio |
 | `Core/ProfileService` | chargement verrouillé, sauvegardes (capture, 60 s, départ, fermeture), réessais, budget | Lune (pannes, verrous, serveurs concurrents) |
 | `Core/MemoryBackend` | stockage simulé (tests, repli Studio) | Lune + Studio |

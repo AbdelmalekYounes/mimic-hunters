@@ -33,7 +33,7 @@ function Theme.rgb(color: { number }): Color3
 	return Color3.fromRGB(color[1], color[2], color[3])
 end
 
-function Theme.create(className: string, props: { [string]: any }, children: { Instance }?): Instance
+function Theme.create(className: string, props: { [string]: any }, children: { any }?): Instance
 	local instance = Instance.new(className)
 	for key, value in props do
 		if key ~= "Parent" then
@@ -80,7 +80,7 @@ function Theme.panel(props: { [string]: any }): Frame
 	merged.BackgroundColor3 = merged.BackgroundColor3 or Theme.Colors.Panel
 	merged.BackgroundTransparency = merged.BackgroundTransparency or 0.12
 	merged.BorderSizePixel = 0
-	local frame = Theme.create("Frame", merged, { Theme.corner(), Theme.stroke() }) :: Frame
+	local frame = Theme.create("Frame", merged, { Theme.corner() :: Instance, Theme.stroke() }) :: Frame
 	return frame
 end
 
@@ -113,7 +113,7 @@ function Theme.button(props: { [string]: any }): TextButton
 	merged.Radius = nil
 	merged.StrokeColor = nil
 	local button = Theme.create("TextButton", merged, {
-		Theme.corner(props.Radius or 16),
+		Theme.corner(props.Radius or 16) :: Instance,
 		Theme.stroke(props.StrokeColor, 3, 0.1),
 	}) :: TextButton
 	local limit = Instance.new("UITextSizeConstraint")

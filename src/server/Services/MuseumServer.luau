@@ -159,7 +159,7 @@ function MuseumServer.start(context: any)
 	end
 
 	handlers._HuntRemoveProp = function(event)
-		local list = huntProps[event.payload.huntId]
+		local list: { [string]: Model } = huntProps[event.payload.huntId] or {}
 		local model = list and list[event.payload.propId]
 		if model then
 			list[event.payload.propId] = nil
@@ -170,7 +170,7 @@ function MuseumServer.start(context: any)
 	handlers._HuntDespawn = function(event)
 		local list = huntProps[event.payload.huntId]
 		huntProps[event.payload.huntId] = nil
-		for _, model in list or {} do
+		for _, model in list do
 			model:Destroy()
 		end
 	end
@@ -185,7 +185,7 @@ function MuseumServer.start(context: any)
 	end
 
 	-- ─── RemoteEvents ──────────────────────────────────────────────────
-	local function guarded(name: string, fn: (...any) -> ())
+	local function guarded(name: string, fn: (...any) -> ...any)
 		return function(...)
 			local ok, err = pcall(fn, ...)
 			if not ok then

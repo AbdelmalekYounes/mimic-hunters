@@ -313,3 +313,33 @@ describe("Musées — configuration des styles", function()
 		expect(found).toBe(true)
 	end)
 end)
+
+describe("Musées — correctifs de l'audit V0.3.1", function()
+	it("refuse un déplacement rapide pendant une capture", function()
+		local world, core = setup()
+		join(world, core, A)
+		join(world, core, B)
+		world.isCapturing = function(_, userId)
+			return userId == A
+		end
+		local _, reply = core:travel(A, "village", nil, 1)
+		expect(reply.reason).toBe("Capturing")
+		_, reply = core:travel(B, "village", nil, 1)
+		expect(reply.ok).toBe(true)
+	end)
+
+	it("garde la liste des musées disponible après une rafale d'actions d'exposition", function()
+		local world, core = setup()
+		join(world, core, A)
+		-- Limites réelles (les tests fonctionnels les assouplissent).
+		core._limiter = Loader.server("Core/RateLimiter").new(Fixtures.GameConfig.RateLimits)
+		local limited = false
+		for i = 1, 12 do
+			local _, styleReply = core:setStyle(A, "wall", "mint", 1 + i * 0.01)
+			limited = limited or styleReply.reason == "RateLimited"
+		end
+		expect(limited).toBe(true)
+		local _, reply = core:list(A, 1.2)
+		expect(reply.reason).toBeNil()
+	end)
+end)

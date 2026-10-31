@@ -420,14 +420,14 @@ local function ground(parent: Instance)
 	local hedge = Color3.fromRGB(64, 118, 70)
 	for _, wall in
 		{
-			{ C(0, 1.5, -hz), V(size[1], 3, 2) },
-			{ C(0, 1.5, hz), V(size[1], 3, 2) },
-			{ C(-hx, 1.5, 0), V(2, 3, size[2]) },
-			{ C(hx, 1.5, 0), V(2, 3, size[2]) },
+			{ cf = C(0, 1.5, -hz), size = V(size[1], 3, 2) },
+			{ cf = C(0, 1.5, hz), size = V(size[1], 3, 2) },
+			{ cf = C(-hx, 1.5, 0), size = V(2, 3, size[2]) },
+			{ cf = C(hx, 1.5, 0), size = V(2, 3, size[2]) },
 		}
 	do
-		block(parent, wall[1], wall[2], hedge, { Name = "Hedge", Material = Enum.Material.Grass })
-		block(parent, wall[1] * C(0, 15, 0), wall[2] + V(0, 30, 0), hedge, {
+		block(parent, wall.cf, wall.size, hedge, { Name = "Hedge", Material = Enum.Material.Grass })
+		block(parent, wall.cf * C(0, 15, 0), wall.size + V(0, 30, 0), hedge, {
 			Name = "InvisibleWall",
 			Transparency = 1,
 			CastShadow = false,

@@ -76,6 +76,7 @@ local TRAVEL_ERRORS = {
 	Waiting = "Tous les musées sont pris : tu recevras le prochain qui se libère.",
 	UnknownMuseum = "Ce musée n'est plus disponible.",
 	RateLimited = "Un instant…",
+	Capturing = "Termine d'abord ta capture !",
 }
 
 function MuseumController.travel(kind: string, target: number?)

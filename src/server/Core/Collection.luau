@@ -36,6 +36,8 @@ export type Options = {
 	-- Cosmétiques disponibles sans objectif (couleur de scanner par défaut, etc.).
 	defaults: { [string]: boolean }?,
 	museumStyles: any?,
+	-- Emplacement d'un cosmétique (« title », « scannerColor »…) ; nil = non vérifié.
+	cosmeticKind: ((id: string) -> string?)?,
 }
 
 local Collection = {}
@@ -50,6 +52,7 @@ function Collection.new(userId: number, profile: ProfileSchema.Profile, options:
 	self._defaults = options.defaults or {}
 	-- Config/MuseumStyles (options gratuites et récompenses) ; nil = styles refusés.
 	self._museumStyles = options.museumStyles
+	self._cosmeticKind = options.cosmeticKind
 	-- Index dérivés (non persistés).
 	self._owned = 0
 	self._bySpecies = {} :: { [string]: number }
@@ -237,6 +240,16 @@ function Collection.setFavorite(self: any, id: any, value: any): (boolean, any)
 end
 
 -- Équipe un cosmétique débloqué (ou un cosmétique par défaut). id nil = retirer (titre seulement).
+-- Un cosmétique ne s'équipe que dans son emplacement (un titre n'est pas une couleur de
+-- scanner). Sans catalogue fourni (anciens tests), on ne peut pas vérifier : accepté.
+function Collection._cosmeticKindIs(self: any, id: string, kind: string): boolean
+	local lookup = self._cosmeticKind
+	if lookup == nil then
+		return true
+	end
+	return lookup(id) == kind
+end
+
 function Collection.equip(self: any, kind: any, id: any): (boolean, string?)
 	local cosmetics = self._profile.cosmetics
 	if kind == "title" then
@@ -247,11 +260,17 @@ function Collection.equip(self: any, kind: any, id: any): (boolean, string?)
 		if type(id) ~= "string" or not (cosmetics.unlocked[id] or self._defaults[id]) then
 			return false, "Locked"
 		end
+		if not self:_cosmeticKindIs(id, "title") then
+			return false, "BadKind"
+		end
 		cosmetics.title = id
 		return true, nil
 	elseif kind == "scannerColor" then
 		if type(id) ~= "string" or not (cosmetics.unlocked[id] or self._defaults[id]) then
 			return false, "Locked"
+		end
+		if not self:_cosmeticKindIs(id, "scannerColor") then
+			return false, "BadKind"
 		end
 		cosmetics.scannerColor = id
 		return true, nil
@@ -408,28 +427,15 @@ function Collection.museumView(self: any): any
 	}
 end
 
--- Espèces que les copies de la Museum Hunt peuvent imiter : celles exposées, sinon possédées.
+-- Exemplaires que les copies de la Museum Hunt peuvent imiter : uniquement ceux que le
+-- propriétaire a choisi d'exposer. Un musée vide ne révèle rien de la collection privée
+-- (audit V0.3.1 : l'ancien repli envoyait au visiteur des exemplaires non exposés).
 function Collection.huntSources(self: any): { any }
 	local list = {}
-	local view = self:museumView()
-	for _, specimen in view.slots do
+	for _, specimen in self:museumView().slots do
 		if specimen then
 			table.insert(list, specimen)
 		end
-	end
-	if #list == 0 then
-		local bySpecies = {}
-		for _, specimen in self._profile.specimens do
-			if bySpecies[specimen.speciesId] == nil then
-				bySpecies[specimen.speciesId] = self:specimenView(specimen)
-			end
-		end
-		for _, specimen in bySpecies do
-			table.insert(list, specimen)
-		end
-		table.sort(list, function(a, b)
-			return a.id < b.id
-		end)
 	end
 	return list
 end

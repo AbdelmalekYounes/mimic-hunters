@@ -29,7 +29,7 @@ function PropTracker.start()
 		register(instance)
 	end
 	CollectionService:GetInstanceAddedSignal(PROP_TAG):Connect(register)
-	CollectionService:GetInstanceRemovedSignal(PROP_TAG):Connect(function(instance)
+	CollectionService:GetInstanceRemovedSignal(PROP_TAG):Connect(function(instance: Instance)
 		local id = instance:GetAttribute("PropId")
 		if type(id) == "string" and props[id] == instance then
 			props[id] = nil
@@ -70,7 +70,7 @@ end
 
 function PropTracker.hide(propId: string)
 	local model = props[propId]
-	if model == nil or hidden[propId] then
+	if not model or hidden[propId] then
 		return
 	end
 	local saved = {}
@@ -90,7 +90,7 @@ function PropTracker.show(propId: string, fade: number?)
 	local saved = hidden[propId]
 	local model = props[propId]
 	hidden[propId] = nil
-	if saved == nil or model == nil then
+	if saved == nil or not model then
 		return
 	end
 	for _, entry in saved do

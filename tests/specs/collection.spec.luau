@@ -156,6 +156,27 @@ describe("Collection", function()
 		expect(select(2, c:equip("hat", "x"))).toBe("BadKind")
 	end)
 
+	it("n'équipe un cosmétique que dans son emplacement (audit V0.3.1)", function()
+		local profile = ProfileSchema.new(100)
+		profile.cosmetics.unlocked = { title_a = true, color_b = true }
+		local kinds = { title_a = "title", color_b = "scannerColor", Cyan = "scannerColor" }
+		local c = Collection.new(USER, profile, {
+			now = function()
+				return 100
+			end,
+			objectives = OBJECTIVES,
+			defaults = { Cyan = true },
+			cosmeticKind = function(id)
+				return kinds[id]
+			end,
+		})
+		expect(select(2, c:equip("title", "Cyan"))).toBe("BadKind")
+		expect(select(2, c:equip("title", "color_b"))).toBe("BadKind")
+		expect(select(2, c:equip("scannerColor", "title_a"))).toBe("BadKind")
+		expect((c:equip("title", "title_a"))).toBe(true)
+		expect((c:equip("scannerColor", "color_b"))).toBe(true)
+	end)
+
 	it("valide les réglages", function()
 		local c = make()
 		expect((c:setSettings({ sfx = false }))).toBe(true)
