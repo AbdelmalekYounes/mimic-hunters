@@ -35,6 +35,8 @@ local accumulator = 0
 local started = false
 
 MutationFx.enabled = true
+-- « Effets réduits » : éclats de mutation allumés seulement à moins de cette distance.
+MutationFx.ReducedLightDistance = 20
 
 local function step(dt: number)
 	accumulator += dt
@@ -50,19 +52,23 @@ local function step(dt: number)
 			table.remove(entries, i)
 			continue
 		end
+		-- Limite de distance de la lumière : celle de l'objet (musée), et au plus
+		-- ReducedLightDistance en « Effets réduits ». Testée AVANT de sauter l'animation :
+		-- sinon, en effets réduits, les éclats restaient allumés partout (audit V0.3.1, C4).
+		local limit = entry.maxDistance
 		if not MutationFx.enabled then
-			continue
+			limit = math.min(limit or math.huge, MutationFx.ReducedLightDistance)
 		end
-		if entry.maxDistance then
+		local far = false
+		if limit then
 			local camera = workspace.CurrentCamera
-			local far = camera ~= nil
-				and (camera.CFrame.Position - model:GetPivot().Position).Magnitude > entry.maxDistance
+			far = camera ~= nil and (camera.CFrame.Position - model:GetPivot().Position).Magnitude > limit
 			if entry.light then
 				entry.light.Enabled = not far
 			end
-			if far then
-				continue
-			end
+		end
+		if far or not MutationFx.enabled then
+			continue
 		end
 		if entry.mutation == "Chromatic" then
 			local rgb = SpecimenLook.chromaticAt(entry.look.body, t)

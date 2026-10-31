@@ -152,9 +152,25 @@ local function build(): Frame
 	return page
 end
 
--- À chaque affichage de l'onglet : liste fraîche demandée au serveur.
+-- À chaque affichage de l'onglet : liste fraîche demandée au serveur, au plus une fois toutes
+-- les 2 s (l'onglet est rafraîchi en rafale à l'ouverture du panneau ; audit V0.3.1, C2).
+local lastRequest = -math.huge
+local pending = false
 local function refresh()
-	Remotes.get("RequestMuseums"):FireServer()
+	local wait = 2 - (os.clock() - lastRequest)
+	if wait <= 0 then
+		lastRequest = os.clock()
+		Remotes.get("RequestMuseums"):FireServer()
+	elseif not pending then
+		pending = true
+		task.delay(wait, function()
+			pending = false
+			if panelApi and panelApi.isOpen() then
+				lastRequest = os.clock()
+				Remotes.get("RequestMuseums"):FireServer()
+			end
+		end)
+	end
 end
 
 function VisitsTab.register(CollectionPanel: any)

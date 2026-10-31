@@ -26,6 +26,8 @@ local CollectionQuery = require(Shared.Logic.CollectionQuery)
 local HudLayout = require(Shared.Logic.HudLayout)
 local SpecimenLook = require(Shared.Logic.SpecimenLook)
 local Remotes = require(Shared.Net.Remotes)
+-- Première ouverture du Codex déjà signalée au serveur (mesure de playtest, V0.3.1).
+local reportedOpen = false
 
 local Client = script.Parent.Parent
 local ClientState = require(Client.ClientState)
@@ -75,6 +77,8 @@ local function formatDate(timestamp: number): string
 	local d = t :: any
 	return string.format("%02d/%02d/%04d à %02dh%02d", d.day, d.month, d.year, d.hour, d.min)
 end
+
+local restyleCards: () -> ()
 
 local function clearChildren(parent: Instance, keep: { [string]: boolean }?)
 	for _, child in parent:GetChildren() do
@@ -533,6 +537,31 @@ local function filterText(): (string, string, string, string, string)
 		(if state.sort == "Rarity" then "Tri : rareté" else "Tri : récents")
 end
 
+-- Couleurs d'une carte selon la sélection (sans reconstruire la carte).
+local function paintCard(card: TextButton, specimen: any)
+	local selected = specimen.id == state.selectedId
+	local rare = Mutations.isRare(specimen.mutation)
+	card.BackgroundColor3 = if selected then Color3.fromRGB(58, 46, 92) else Color3.fromRGB(40, 32, 62)
+	local stroke = card:FindFirstChild("Border") :: UIStroke?
+	if stroke then
+		stroke.Color = if selected
+			then C.Mint
+			elseif rare then mutationColor(specimen.mutation)
+			else rarityColor(specimen.rarity)
+		stroke.Thickness = if selected or rare then 3 else 2
+		stroke.Transparency = if selected then 0 else 0.3
+	end
+end
+
+restyleCards = function()
+	for _, card in ui.grid:GetChildren() do
+		local specimen = card:IsA("TextButton") and ClientState.specimensById[card.Name]
+		if specimen then
+			paintCard(card :: TextButton, specimen)
+		end
+	end
+end
+
 local function makeCard(specimen: any, order: number): TextButton
 	local species = MimicCatalog.get(specimen.speciesId)
 	local selected = specimen.id == state.selectedId
@@ -552,6 +581,7 @@ local function makeCard(specimen: any, order: number): TextButton
 		if selected or rare then 3 else 2,
 		if selected then 0 else 0.3
 	)
+	stroke.Name = "Border"
 	stroke.Parent = card
 	local viewport = Theme.create("ViewportFrame", {
 		Name = "Preview",
@@ -614,6 +644,9 @@ local function refreshDetail(specimen: any?)
 		ui.detail.Visible = false
 		detailModel = nil
 		ModelView.clear(ui.detailViewport)
+		-- Sinon, rouvrir le même exemplaire (téléphone : Retour puis carte) laissait l'aperçu
+		-- vide : le modèle n'était pas reconstruit (audit V0.3.1, C6).
+		ui.detailViewport:SetAttribute("SpecimenId", nil)
 		return
 	end
 	local species = MimicCatalog.get(specimen.speciesId)
@@ -651,10 +684,21 @@ local function refreshInventory()
 	local list = CollectionQuery.sort(CollectionQuery.filter(ClientState.specimens, state.filter), state.sort)
 	local items, page, pages = CollectionQuery.paginate(list, state.page, ui.perPage or 8)
 	state.page = page
-	clearChildren(ui.grid)
-	for index, specimen in items do
-		makeCard(specimen, index)
+	-- Les cartes (aperçu 3D compris) ne sont reconstruites que si la page affiche autre chose ;
+	-- un simple changement de sélection ne fait que repeindre les cartes (audit V0.3.1, C1).
+	local parts = {}
+	for _, specimen in items do
+		table.insert(parts, specimen.id .. (if specimen.favorite then "*" else ""))
 	end
+	local signature = table.concat(parts, ",")
+	if signature ~= ui.gridSignature or #ui.grid:GetChildren() <= 1 then
+		ui.gridSignature = signature
+		clearChildren(ui.grid)
+		for index, specimen in items do
+			makeCard(specimen, index)
+		end
+	end
+	restyleCards()
 	ui.pageLabel.Text =
 		string.format("Page %d / %d   ·   %d Mimic%s", page, pages, #list, if #list > 1 then "s" else "")
 	ui.prev.Visible = page > 1
@@ -688,7 +732,10 @@ end
 
 local function layout()
 	local panel = ui.panel :: Frame
-	local size = panel.AbsoluteSize
+	-- Taille sans le zoom d'ouverture (UIScale) : AbsoluteSize varie à chaque image du zoom,
+	-- ce qui relançait la disposition et la reconstruction de tout l'inventaire ≈ 9 fois en
+	-- 0,15 s (audit V0.3.1, C1). Le panneau est dimensionné en pixels par place().
+	local size = Vector2.new(panel.Size.X.Offset, panel.Size.Y.Offset)
 	if size.X < 10 then
 		return
 	end
@@ -847,9 +894,19 @@ function CollectionPanel.setOpen(open: boolean)
 	end)
 	if open then
 		panel.Visible = true
+		-- Mesure de playtest : première ouverture du Codex (une fois par session).
+		if not reportedOpen then
+			reportedOpen = true
+			Remotes.get("ReportMilestone"):FireServer("CodexOpened")
+		end
 		-- Ouverture rapide (0,15 s) : léger zoom depuis 92 %.
-		ui.scale.Scale = 0.92
-		Animate.tween(ui.scale, 0.15, { Scale = 1 }, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+		local settings = ClientState.summary and ClientState.summary.settings
+		if settings and settings.reducedEffects then
+			ui.scale.Scale = 1
+		else
+			ui.scale.Scale = 0.92
+			Animate.tween(ui.scale, 0.15, { Scale = 1 }, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+		end
 		CollectionPanel.showTab(state.tab)
 	else
 		panel.Visible = false
@@ -917,7 +974,7 @@ function CollectionPanel.build(gui: ScreenGui, touch: boolean)
 	end
 	place()
 	gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(place)
-	panel:GetPropertyChangedSignal("AbsoluteSize"):Connect(layout)
+	panel:GetPropertyChangedSignal("Size"):Connect(layout)
 	layout()
 
 	ClientState.CollectionChanged:Connect(function()

@@ -268,7 +268,8 @@ end
 
 local function flicker(model: Model, strong: boolean)
 	local parts, lights = glowParts(model)
-	if #parts == 0 then
+	-- « Effets réduits » : pas de clignotement (7 à 16 alternances par seconde), une vibration.
+	if #parts == 0 or reducedEffects() then
 		vibrate(model, strong)
 		return
 	end
@@ -292,6 +293,11 @@ local function flicker(model: Model, strong: boolean)
 end
 
 local function glitch(model: Model, strong: boolean)
+	-- « Effets réduits » : pas de changement de couleur à chaque image, une vibration.
+	if reducedEffects() then
+		vibrate(model, strong)
+		return
+	end
 	local parts = glowParts(model)
 	local saved = {}
 	for _, part in parts do
@@ -432,7 +438,7 @@ local function revealAnimation(creature: Creature)
 	if order >= 3 then
 		ring(base.Position, rarityColor(species.id), 10 + order * 2, 0.5)
 	end
-	if style == "Flash" then
+	if style == "Flash" and not reducedEffects() then
 		for _, light in model:GetDescendants() do
 			if light:IsA("PointLight") then
 				light.Range = 40
@@ -695,11 +701,24 @@ local function onMimicChanged(info: ClientState.MimicInfo)
 	end
 end
 
--- Animation d'attente (rebond) et de lutte (tremblement) des Mimics révélés.
-local function idle()
+-- Animation d'attente (rebond) et de lutte (tremblement) des Mimics révélés : 30 fois par
+-- seconde, et seulement à moins de IdleDistance de la caméra (audit V0.3.1, C5).
+local IDLE_DISTANCE = 90
+local idleClock = 0
+local function idle(dt: number)
+	idleClock += dt
+	if idleClock < 1 / 30 then
+		return
+	end
+	idleClock = 0
 	local t = os.clock()
+	local camera = workspace.CurrentCamera
+	local eye = if camera then camera.CFrame.Position else nil
 	for _, creature in creatures do
 		if creature.animating or creature.mode == "Leaving" or creature.model.Parent == nil then
+			continue
+		end
+		if eye and (creature.base.Position - eye).Magnitude > IDLE_DISTANCE then
 			continue
 		end
 		local offset
@@ -713,7 +732,10 @@ local function idle()
 			offset = C(0, 0.3 + math.sin(t * 4) * 0.3, 0) * CFrame.Angles(0, math.sin(t * 1.7) * 0.25, 0)
 		end
 		creature.model:PivotTo(creature.base * offset)
-		creature.status.Text = statusText(creature)
+		local text = statusText(creature)
+		if creature.status.Text ~= text then
+			creature.status.Text = text
+		end
 	end
 end
 

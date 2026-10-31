@@ -42,6 +42,8 @@ export type PlotRefs = {
 	pedestals: { BasePart },
 	slotLabels: { TextLabel },
 	nameLabel: TextLabel,
+	-- Clé de rendu de chaque vitrine (V0.3.1) : une vitrine inchangée n'est pas reconstruite.
+	rendered: { [number]: string? },
 	boardLabel: TextLabel,
 	exhibits: Folder,
 	hunt: Folder,
@@ -357,6 +359,7 @@ function MuseumBuilder.buildPlot(index: number, parent: Instance): PlotRefs
 		pedestals = pedestals,
 		slotLabels = slotLabels,
 		nameLabel = nameLabel,
+		rendered = {},
 		boardLabel = boardLabel,
 		exhibits = exhibits,
 		hunt = hunt,
@@ -417,6 +420,7 @@ end
 
 function MuseumBuilder.clearExhibits(refs: PlotRefs)
 	refs.exhibits:ClearAllChildren()
+	table.clear(refs.rendered)
 	for slot, label in refs.slotLabels do
 		label.Text = tostring(slot)
 		label.TextColor3 = Color3.fromRGB(200, 190, 230)
@@ -430,12 +434,44 @@ end
 	l'exemplaire reste dans la collection du propriétaire.
 ]]
 function MuseumBuilder.renderExhibits(refs: PlotRefs, slots: { any }, ownerName: string, ownerUserId: number)
-	MuseumBuilder.clearExhibits(refs)
-	for slot, specimen in slots do
-		local base = refs.pedestals[slot]
+	--[[
+		Rendu incrémental (V0.3.1, jalon 4) : avant, chaque action du propriétaire (même un
+		simple changement de couleur) détruisait et recréait les 6 Mimics, leurs vitrines et leurs
+		invites, soit ≈ 200 à 300 Instances répliquées à tous les clients. Une vitrine n'est
+		maintenant reconstruite que si ce qu'elle montre change (exemplaire, apparence,
+		propriétaire, hauteur du socle).
+	]]
+	for slot, base in refs.pedestals do
+		local specimen = slots[slot]
 		local species = specimen and MimicCatalog.get(specimen.speciesId)
+		local key = if species
+			then string.format(
+				"%s|%s|%s|%s|%d|%s|%.3f",
+				tostring(specimen.id),
+				species.id,
+				tostring(specimen.seed),
+				tostring(specimen.mutation),
+				ownerUserId,
+				ownerName,
+				base.Size.Y
+			)
+			else nil
+		local current = refs.exhibits:FindFirstChild("Exhibit" .. slot)
+		if refs.rendered[slot] == key and (key == nil or current ~= nil) then
+			continue
+		end
+		refs.rendered[slot] = key
+		for _, name in { "Exhibit" .. slot, "Case" .. slot } do
+			local old = refs.exhibits:FindFirstChild(name)
+			if old then
+				old:Destroy()
+			end
+		end
 		-- Vitrine vide (false) ou espèce disparue : rien à poser.
-		if not base or not species then
+		if not species then
+			local label = refs.slotLabels[slot]
+			label.Text = tostring(slot)
+			label.TextColor3 = Color3.fromRGB(200, 190, 230)
 			continue
 		end
 		local look = SpecimenLook.compute(species, specimen.seed, specimen.mutation)

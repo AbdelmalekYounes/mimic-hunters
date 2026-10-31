@@ -123,6 +123,9 @@ local function showDiscovery(payload: any)
 		if token == popupToken then
 			refs.popup.Visible = false
 			popupModel = nil
+			-- Le modèle restait dans l'aperçu masqué et ses effets tournaient jusqu'à la capture
+			-- suivante (audit V0.3.1, C5).
+			ModelView.clear(refs.popupViewport)
 		end
 	end)
 end
