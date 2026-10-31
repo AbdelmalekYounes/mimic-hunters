@@ -98,6 +98,33 @@ return function(deps: any): { any }
 		return profile
 	end
 
+	-- Comparaison champ par champ (l'ordre des clés d'un JSONEncode n'est pas garanti par
+	-- Roblox : comparer deux chaînes JSON peut échouer sans aucune différence réelle).
+	-- Retourne (true) ou (false, chemin de la première différence).
+	local function sameValue(a: any, b: any, path: string): (boolean, string?)
+		if type(a) ~= type(b) then
+			return false, string.format("%s : %s ≠ %s", path, tostring(a), tostring(b))
+		end
+		if type(a) ~= "table" then
+			if a ~= b then
+				return false, string.format("%s : %s ≠ %s", path, tostring(a), tostring(b))
+			end
+			return true, nil
+		end
+		for k, v in a do
+			local ok, where = sameValue(v, b[k], path .. "." .. tostring(k))
+			if not ok then
+				return false, where
+			end
+		end
+		for k, v in b do
+			if a[k] == nil then
+				return false, string.format("%s.%s : absent ≠ %s", path, tostring(k), tostring(v))
+			end
+		end
+		return true, nil
+	end
+
 	local function step(name: string, fn: () -> (boolean, string?))
 		local ok, passed, detail = pcall(fn)
 		if not ok then
@@ -139,12 +166,16 @@ return function(deps: any): { any }
 		local b = service("check-B")
 		local _, data = b:load(user)
 		b:release(user, nil)
-		local same = data ~= nil
-			and deps.encode(data.specimens) == deps.encode(original.specimens)
-			and deps.encode(data.museum) == deps.encode(original.museum)
-			and data.cosmetics.title == "title_apprentice"
-			and data.objectives.first_capture == 1
-		return same, nil
+		if data == nil then
+			return false, "aucune donnée relue"
+		end
+		for _, field in { "specimens", "museum", "cosmetics", "objectives", "nextSerial" } do
+			local ok, where = sameValue(original[field], data[field], field)
+			if not ok then
+				return false, where
+			end
+		end
+		return true, "exemplaires, vitrines, styles, cosmétiques, objectifs identiques"
 	end)
 
 	step("10. profil V0.2 stocké : migré en v3 sans perte", function()
@@ -206,6 +237,46 @@ return function(deps: any): { any }
 		end)
 		local saved = a:save(user, ProfileSchema.new(deps.clock()), false)
 		return saved == false and lost[1] == user, nil
+	end)
+
+	step("Libération : verrou retiré, données intactes", function()
+		local user = freshUser()
+		local s = service("check-A")
+		assert(s:load(user) == "Ready", "chargement")
+		local profile = ProfileSchema.new(deps.clock())
+		profile.stats.totalCaptures = 4
+		assert(s:release(user, profile), "libération")
+		local record = store:GetAsync(keyOf(user))
+		local released = type(record) == "table" and record.meta.lock == nil
+		local intact = released and record.data.stats.totalCaptures == 4 and record.meta.hasData == true
+		return intact and s:status(user) == nil, if released then "verrou retiré" else "verrou encore posé"
+	end)
+
+	step("P7. écriture appliquée puis réessayée : reconnue, pas de verrou perdu", function()
+		local user = freshUser()
+		local s = service("check-A")
+		assert(s:load(user) == "Ready", "chargement")
+		local sessionId = s:sessionOf(user)
+		local profile = ProfileSchema.new(deps.clock())
+		profile.stats.totalCaptures = 9
+		local commitId = sessionId .. "#rejeu"
+		local function attempt()
+			local outcome = nil
+			local ok = deps.backend:update(keyOf(user), function(current)
+				local out, result =
+					ProfileService.commitTransform(current, sessionId, profile, deps.clock(), true, commitId)
+				outcome = result
+				return out
+			end)
+			return ok, outcome
+		end
+		-- 1er essai : écriture appliquée (et verrou libéré). 2e essai, comme après une réponse
+		-- perdue : le verrou n'est plus là, mais l'identifiant d'écriture prouve qu'elle est faite.
+		local ok1, first = attempt()
+		local ok2, second = attempt()
+		local record = store:GetAsync(keyOf(user))
+		return ok1 and ok2 and first == "Saved" and second == "Saved" and record.data.stats.totalCaptures == 9,
+			string.format("%s puis %s", tostring(first), tostring(second))
 	end)
 
 	step("P4. enregistrement illisible : jamais remplacé", function()

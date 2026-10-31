@@ -48,6 +48,27 @@ function Invoke-Job([IO.DirectoryInfo]$jobDir) {
 
 	$console = Join-Path $jobDir.FullName "console.txt"
 	$env:MIMIC_COMMIT = $job.commit
+
+	# Tâche « remote » (V0.3.2) : télécommande de l'interface de la VM (tools/vm-remote.ps1),
+	# pour piloter Roblox Studio sans jamais utiliser la souris ni le clavier de l'hôte.
+	if ($job.kind -eq "remote") {
+		$exitCode = -1
+		Push-Location $work
+		try {
+			$ErrorActionPreference = "Continue"
+			& rokit install --no-trust-check 2>&1 | ForEach-Object { "$_" } | Out-File -Encoding utf8 $console
+			& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $work "tools\vm-remote.ps1") -Exchange $Exchange 2>&1 |
+				ForEach-Object { $line = "$_"; $line | Out-File -Append -Encoding utf8 $console; $line } | Out-Host
+			$exitCode = $LASTEXITCODE
+		} catch {
+			"$_" | Out-File -Append -Encoding utf8 $console
+		} finally { Pop-Location }
+		Write-Json (Join-Path $jobDir.FullName "done.json") ([pscustomobject]@{
+			id = $id; kind = "remote"; exitCode = $exitCode; guest = $env:COMPUTERNAME
+			startedAt = $started.ToString("o"); finishedAt = (Get-Date).ToString("o")
+		})
+		return
+	}
 	$arguments = @("-Visible", "-Screenshots")
 	if ($job.sessions) { $arguments += @("-Sessions", ($job.sessions -join ",")) }
 	if ($ExtraArgs) { $arguments += ($ExtraArgs -split " ") }

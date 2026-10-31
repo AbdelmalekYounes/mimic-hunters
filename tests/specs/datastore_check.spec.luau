@@ -68,7 +68,7 @@ local function fakeStore(env)
 end
 
 describe("Contrôle du vrai DataStore — script vérifié sur un DataStore simulé", function()
-	it("passe ses 9 scénarios sans jamais toucher une clé de joueur", function()
+	it("passe ses 11 scénarios sans jamais toucher une clé de joueur", function()
 		local env = Scheduler.new(1700000000)
 		local store, backend, data = fakeStore(env)
 		local results
@@ -91,7 +91,7 @@ describe("Contrôle du vrai DataStore — script vérifié sur un DataStore simu
 				print = function() end,
 			})
 		end)
-		expect(#results).toBe(9)
+		expect(#results).toBe(11)
 		for _, r in results do
 			if not r.ok then
 				error(r.name .. " : " .. tostring(r.detail), 0)

@@ -22,7 +22,10 @@ param(
 	[int]$TimeoutSec = 1200,
 	[switch]$KeepRunning,
 	# Débogage du protocole sans VM : ne pilote pas VMware (un agent doit tourner ailleurs).
-	[switch]$NoVmControl
+	[switch]$NoVmControl,
+	# V0.3.2 : démarre la télécommande de la VM (tools/vm-remote.ps1) au lieu des tests ; rend la
+	# main dès sa prise en charge. Les commandes s'envoient ensuite avec tools/vm-do.ps1.
+	[switch]$Remote
 )
 
 $ErrorActionPreference = "Stop"
@@ -128,10 +131,22 @@ foreach ($f in $files) {
 	New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dst) | Out-Null
 	Copy-Item $src $dst
 }
-[pscustomobject]@{ id = $id; commit = $commit; sessions = $Sessions; createdAt = (Get-Date).ToString("o") } |
-	ConvertTo-Json | Out-File -Encoding utf8 (Join-Path $jobDir "job.json")
+[pscustomobject]@{
+	id = $id; commit = $commit; sessions = $Sessions; createdAt = (Get-Date).ToString("o")
+	kind = $(if ($Remote) { "remote" } else { "tests" })
+} | ConvertTo-Json | Out-File -Encoding utf8 (Join-Path $jobDir "job.json")
 New-Item -ItemType File -Path (Join-Path $jobDir "job.ready") | Out-Null
 Write-Host "Tâche $id déposée ($($files.Count) fichiers, commit $commit)."
+
+if ($Remote) {
+	$deadline = (Get-Date).AddSeconds(240)
+	while (-not (Test-Path (Join-Path $jobDir "claimed"))) {
+		if ((Get-Date) -gt $deadline) { throw "La télécommande n'a pas été prise en charge par l'agent." }
+		Start-Sleep -Seconds 2
+	}
+	Write-Host "Télécommande de la VM démarrée (tâche $id). Commandes : tools\vm-do.ps1 ; arrêt : action « exit »."
+	exit 0
+}
 
 # Attente du résultat.
 $done = Join-Path $jobDir "done.json"

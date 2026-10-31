@@ -1,0 +1,10 @@
+{
+  "name": "MimicImport",
+  "tree": {
+    "$className": "Folder",
+    "Shared": { "$path": "../src/shared" },
+    "Server": { "$path": "../src/server" },
+    "Client": { "$path": "../src/client" },
+    "DataStoreCheck": { "$path": "../tests/datastore" }
+  }
+}
