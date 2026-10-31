@@ -110,6 +110,9 @@ end
 function CollectionPanel.addTab(id: string, text: string, page: GuiObject, refresh: () -> ())
 	local tab: Tab = { id = id, label = text, page = page, refresh = refresh }
 	table.insert(tabs, tab)
+	-- La page occupe toute la zone de contenu (sinon taille par défaut de 100×100 px :
+	-- constaté sur les captures de la VM, codex et objectifs y apparaissaient vides).
+	page.Size = UDim2.fromScale(1, 1)
 	page.Visible = false
 	page.Parent = ui.content
 	makeTabButton(tab, #tabs)

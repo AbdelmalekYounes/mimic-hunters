@@ -521,6 +521,45 @@ local reports: { [number]: any } = {}
 bus.OnServerEvent:Connect(function(player, kind, data)
 	if kind == "report" then
 		reports[player.UserId] = data
+	elseif kind == "prepare_mutation" then
+		-- Prépare une capture rare pour le vrai client : mutation imposée (hook Studio),
+		-- personnage placé à côté d'un Mimic caché, Mimic révélé pour ce joueur.
+		-- Le client capture ensuite par le réseau, comme en jeu.
+		local mutation = if type(data) == "table" and type(data.mutation) == "string"
+			then data.mutation
+			else "Chromatic"
+		workspace:SetAttribute("MH_ForceMutation", mutation)
+		local record = findHidden()
+		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+		if record == nil or root == nil then
+			bus:FireClient(player, "mutation_ready", { ok = false })
+			return
+		end
+		local position = slotPosition(record.slotId)
+		root.CFrame = CFrame.new(position + Vector3.new(0, 2, 0))
+		task.wait(0.3)
+		local _, inspected = world:inspect(player.UserId, position, record.slotId, os.clock())
+		-- Diffuse la révélation au client (les événements retournés ne passent pas par HuntServer ici).
+		local remotes = ReplicatedStorage:FindFirstChild("MimicRemotes")
+		local update = remotes and remotes:FindFirstChild("MimicUpdate") :: RemoteEvent?
+		if update and inspected.result == "Mimic" then
+			update:FireClient(player, {
+				mimicId = record.id,
+				propId = record.slotId,
+				speciesId = record.speciesId,
+				state = "Revealed",
+				ownerUserId = player.UserId,
+				remaining = GameConfig.Hunt.RevealClaimDuration,
+			})
+		end
+		bus:FireClient(player, "mutation_ready", {
+			ok = inspected.result == "Mimic",
+			mimicId = record.id,
+			reason = inspected.result or inspected.reason,
+		})
+		task.delay(20, function()
+			workspace:SetAttribute("MH_ForceMutation", nil)
+		end)
 	end
 end)
 
@@ -545,6 +584,16 @@ end
 -- ─── Suite « client » (session Play, 1 joueur) ─────────────────────────
 
 local function clientSuite()
+	-- Journal horodaté des requêtes du joueur (rapport) : sert à diagnostiquer les entrées parasites.
+	local remotesFolder = ReplicatedStorage:WaitForChild("MimicRemotes", 10)
+	for _, name in { "RequestScan", "RequestInspect", "RequestCapture", "SubmitPulse", "ClientReady" } do
+		local r = remotesFolder and remotesFolder:FindFirstChild(name) :: RemoteEvent?
+		if r then
+			r.OnServerEvent:Connect(function(_, ...)
+				log(string.format("%.3f %s %s", os.clock(), name, tostring((...))))
+			end)
+		end
+	end
 	local players = waitPlayers(1, 30)
 	local player = players[1]
 	check("joueur.connexion", function()

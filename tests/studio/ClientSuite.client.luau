@@ -40,6 +40,73 @@ if bus == nil then
 	return
 end
 
+--[[
+	Bouclier d'entrées. Constaté le 31/10/2026 : sur le bureau Windows caché, Studio reçoit
+	quand même des clics et des touches (entrée brute du système) pendant que l'utilisateur se
+	sert de son PC. Ils déclenchaient des captures, des impulsions et des déplacements parasites.
+	Les tests n'utilisent jamais le clavier ni la souris (tout passe par les RemoteEvents) :
+	on neutralise donc toutes ces entrées dans le client de test.
+]]
+local ContextActionService = game:GetService("ContextActionService")
+ContextActionService:BindActionAtPriority(
+	"MH_TestInputShield",
+	function()
+		return Enum.ContextActionResult.Sink
+	end,
+	false,
+	Enum.ContextActionPriority.High.Value + 1000,
+	Enum.UserInputType.MouseButton1,
+	Enum.UserInputType.MouseButton2,
+	Enum.UserInputType.Touch,
+	Enum.KeyCode.Space,
+	Enum.KeyCode.E,
+	Enum.KeyCode.F,
+	Enum.KeyCode.C,
+	Enum.KeyCode.W,
+	Enum.KeyCode.A,
+	Enum.KeyCode.S,
+	Enum.KeyCode.D,
+	Enum.KeyCode.Up,
+	Enum.KeyCode.Down,
+	Enum.KeyCode.Left,
+	Enum.KeyCode.Right,
+	Enum.KeyCode.Slash,
+	Enum.KeyCode.ButtonA,
+	Enum.KeyCode.ButtonX,
+	Enum.KeyCode.ButtonY,
+	Enum.KeyCode.ButtonSelect,
+	Enum.KeyCode.Thumbstick1
+)
+do
+	-- Clics sur le monde : absorbés par une couche transparente (« traités par l'interface »).
+	local shield = Instance.new("ScreenGui")
+	shield.Name = "MH_TestShield"
+	shield.DisplayOrder = 1000
+	shield.IgnoreGuiInset = true
+	shield.ResetOnSpawn = false
+	local blocker = Instance.new("TextButton")
+	blocker.Name = "Blocker"
+	blocker.Text = ""
+	blocker.BackgroundTransparency = 1
+	blocker.AutoButtonColor = false
+	blocker.Selectable = false
+	blocker.Size = UDim2.fromScale(1, 1)
+	blocker.Parent = shield
+	shield.Parent = player:WaitForChild("PlayerGui")
+	-- Personnage immobile : aucune touche ne peut l'éloigner de l'objet du tutoriel.
+	local function freeze(character: Model)
+		local humanoid = character:WaitForChild("Humanoid", 10) :: Humanoid?
+		if humanoid then
+			humanoid.WalkSpeed = 0
+			humanoid.JumpPower = 0
+		end
+	end
+	if player.Character then
+		task.spawn(freeze, player.Character)
+	end
+	player.CharacterAdded:Connect(freeze)
+end
+
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local CaptureMinigame = require(Shared.Logic.CaptureMinigame)
 local GameConfig = require(Shared.Config.GameConfig)
@@ -238,7 +305,9 @@ local function runTests(payload: any)
 		for _ = 1, 6 do
 			-- Vise le centre de la zone avec la même formule que le serveur.
 			local t = if stage.phase == 0 then stage.center / stage.speed else (1 - stage.center) / stage.speed
-			while t < GameConfig.Capture.MinStageElapsed + 0.05 do
+			-- Prochain passage du curseur au centre, jamais dans le passé (robuste à un à-coup du client).
+			local earliest = math.max(GameConfig.Capture.MinStageElapsed + 0.05, os.clock() - stageStart + 0.05)
+			while t < earliest do
 				t += 2 / stage.speed
 			end
 			while os.clock() - stageStart < t do
@@ -295,6 +364,78 @@ local function runTests(payload: any)
 		)
 	end)
 
+	-- ─── Capture rare par le réseau (révélation de mutation) ──────────────
+	check("e2e.capture_mutation", function()
+		-- PC : Chromatic ; mobile simulé : Spectral (les deux apparaissent dans les captures d'écran).
+		local wanted = if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+			then "Spectral"
+			else "Chromatic"
+		local ready = nil
+		local conn = bus.OnClientEvent:Connect(function(kind, data)
+			if kind == "mutation_ready" then
+				ready = data
+			end
+		end)
+		task.wait(1.5) -- laisse finir la carte de la capture précédente
+		bus:FireServer("prepare_mutation", { mutation = wanted })
+		local deadline = os.clock() + 6
+		while ready == nil and os.clock() < deadline do
+			task.wait(0.1)
+		end
+		conn:Disconnect()
+		expect(ready and ready.ok, "préparation : " .. tostring(ready and ready.reason))
+		local resolved, delta = nil, nil
+		local c1 = remote("CaptureResolved").OnClientEvent:Connect(function(p)
+			resolved = p
+		end)
+		local c2 = remote("CollectionDelta").OnClientEvent:Connect(function(p)
+			delta = p
+		end)
+		local started = request("RequestCapture", "CaptureStarted", 5, ready.mimicId)
+		expect(started and started.ok, "CaptureStarted refusé : " .. tostring(started and started.reason))
+		local stage, stageStart = started.stage, os.clock()
+		for _ = 1, 6 do
+			local t = if stage.phase == 0 then stage.center / stage.speed else (1 - stage.center) / stage.speed
+			-- Prochain passage du curseur au centre, jamais dans le passé (robuste à un à-coup du client).
+			local earliest = math.max(GameConfig.Capture.MinStageElapsed + 0.05, os.clock() - stageStart + 0.05)
+			while t < earliest do
+				t += 2 / stage.speed
+			end
+			while os.clock() - stageStart < t do
+				task.wait()
+			end
+			local reply = request("SubmitPulse", "PulseResult", 5, started.attemptId, os.clock() - stageStart)
+			expect(reply and reply.ok, "impulsion refusée : " .. tostring(reply and reply.reason))
+			if reply.stage then
+				stage, stageStart = reply.stage, os.clock()
+			end
+			if reply.status ~= "Active" then
+				break
+			end
+		end
+		deadline = os.clock() + 5
+		while (resolved == nil or delta == nil) and os.clock() < deadline do
+			task.wait()
+		end
+		c1:Disconnect()
+		c2:Disconnect()
+		expect(
+			resolved and resolved.success,
+			"capture rare non confirmée : " .. tostring(resolved and resolved.reason)
+		)
+		expect(resolved.mutation == wanted, "mutation : " .. tostring(resolved.mutation))
+		expect(delta and delta.added and delta.added.mutation == wanted, "exemplaire muté absent de la collection")
+		env.mutationSpecimen = delta.added.id
+		-- Carte de capture dédiée (titre de la mutation).
+		task.wait(1.2)
+		local headline = hud.Discovery:FindFirstChild("Headline") :: TextLabel
+		expect(
+			headline and string.find(headline.Text, string.upper(wanted), 1, true),
+			"carte : " .. tostring(headline and headline.Text)
+		)
+		task.wait(2.2)
+	end)
+
 	-- ─── Panneau Collection (Codex, Inventaire, fiche, favori) ───────────
 	-- Modules du jeu côté client : même instance que l'interface affichée.
 	local clientRoot = player:WaitForChild("PlayerScripts"):WaitForChild("Client", 10)
@@ -321,8 +462,11 @@ local function runTests(payload: any)
 		env.panel = string.format("%d,%d %dx%d", p.X, p.Y, s.X, s.Y)
 		expect(p.X >= 0 and p.Y >= 0 and p.X + s.X <= screen.X + 1 and p.Y + s.Y <= screen.Y + 1, "panneau hors écran")
 		local completion = panel:FindFirstChild("Completion") :: TextLabel
+		local discovered = ClientState.summary and ClientState.summary.discovered or 0
+		env.discovered = discovered
+		expect(discovered >= 1, "aucune espèce découverte")
 		expect(
-			completion and string.find(completion.Text, "Espèces 1/6", 1, true),
+			completion and string.find(completion.Text, tostring(discovered) .. "/6", 1, true),
 			"complétion : " .. tostring(completion and completion.Text)
 		)
 		task.wait(VIEW_PAUSE)
@@ -331,12 +475,31 @@ local function runTests(payload: any)
 	check("collection.codex", function()
 		local grid = panel:FindFirstChild("CodexPage", true) :: Frame
 		expect(grid and grid.Visible, "onglet Codex non affiché")
+		-- Visibilité réelle : la page remplit le contenu et les cartes sont dans le panneau.
+		expect(grid.AbsoluteSize.X > panel.AbsoluteSize.X * 0.8, "page Codex trop étroite : " .. grid.AbsoluteSize.X)
+		local firstCard = grid:FindFirstChild("chairy", true) :: GuiObject
+		expect(
+			firstCard and firstCard.AbsoluteSize.X > 60 and inside(firstCard, panel),
+			"carte du codex invisible ou hors du panneau"
+		)
 		local chairy = grid:FindFirstChild("chairy", true) :: GuiObject
 		local name = chairy and chairy:FindFirstChild("Name") :: TextLabel
 		expect(name and name.Text == "Chairy", "Chairy non découvert dans le codex")
-		local posty = grid:FindFirstChild("posty", true) :: GuiObject
-		local hidden = posty and posty:FindFirstChild("Name") :: TextLabel
-		expect(hidden and hidden.Text == "???", "espèce manquante affichée : " .. tostring(hidden and hidden.Text))
+		-- Chaque espèce : nom si découverte, « ??? » sinon (au plus 2 découvertes dans ce test).
+		local hiddenCount = 0
+		for _, species in { "chairy", "trashling", "posty", "lumino", "chompy", "vendoo" } do
+			local card = grid:FindFirstChild(species, true) :: GuiObject
+			local label = card and card:FindFirstChild("Name") :: TextLabel
+			local known = ClientState.summary.codex[species] ~= nil
+			expect(
+				label and ((known and label.Text ~= "???") or (not known and label.Text == "???")),
+				species .. " mal affiché"
+			)
+			if not known then
+				hiddenCount += 1
+			end
+		end
+		expect(hiddenCount >= 4, "espèces manquantes : " .. hiddenCount)
 		local chances = grid:FindFirstChild("Chances") :: TextLabel
 		expect(chances and string.find(chances.Text, "Chromatic 4 %", 1, true), "probabilités non affichées")
 	end)
@@ -388,6 +551,15 @@ local function runTests(payload: any)
 		task.wait(0.3)
 		local page = panel:FindFirstChild("ObjectivesPage", true) :: Frame
 		expect(page and page.Visible, "onglet Objectifs non affiché")
+		expect(
+			page.AbsoluteSize.X > panel.AbsoluteSize.X * 0.8,
+			"page Objectifs trop étroite : " .. page.AbsoluteSize.X
+		)
+		local firstRow = page:FindFirstChild("first_capture", true) :: GuiObject
+		expect(
+			firstRow and firstRow.AbsoluteSize.X > 200 and inside(firstRow, panel),
+			"ligne d'objectif invisible ou hors du panneau"
+		)
 		local row = page:FindFirstChild("first_capture", true) :: Frame
 		local status = row and row:FindFirstChild("Status") :: TextLabel
 		expect(
@@ -397,7 +569,7 @@ local function runTests(payload: any)
 		local pending = page:FindFirstChild("ten_captures", true) :: Frame
 		local progress = pending and pending:FindFirstChild("Status") :: TextLabel
 		expect(
-			progress and progress.Text == "1/10",
+			progress and progress.Text == string.format("%d/10", ClientState.summary.totalCaptures),
 			"progression « Dix captures » : " .. tostring(progress and progress.Text)
 		)
 		local reply = request("EquipCosmetic", "CollectionResult", 5, "title", "title_apprentice")

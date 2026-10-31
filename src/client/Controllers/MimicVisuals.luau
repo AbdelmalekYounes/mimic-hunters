@@ -69,8 +69,45 @@ local function partsOf(model: Model): { BasePart }
 	return out
 end
 
+-- Réglage « Effets réduits » du joueur (profil) : moins de particules, pas d'anneaux.
+local function reducedEffects(): boolean
+	local summary = ClientState.summary
+	return summary ~= nil and summary.settings ~= nil and summary.settings.reducedEffects == true
+end
+
+-- Ordre de rareté de l'espèce (1 = Commun … 4 = Épique) : dose les effets.
+local function rarityOrder(speciesId: string): number
+	local species = MimicCatalog.get(speciesId)
+	local rarity = species and Rarities.get(species.rarity)
+	return if rarity then rarity.order else 1
+end
+
+-- Anneau lumineux qui s'élargit au sol (révélation rare, capture d'une espèce rare).
+local function ring(position: Vector3, color: Color3, diameter: number, duration: number)
+	if reducedEffects() then
+		return
+	end
+	local part = Instance.new("Part")
+	part.Shape = Enum.PartType.Cylinder
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.CastShadow = false
+	part.Material = Enum.Material.Neon
+	part.Color = color
+	part.Size = Vector3.new(0.2, 2, 2)
+	part.CFrame = CFrame.new(position + Vector3.new(0, 0.2, 0)) * CFrame.Angles(0, 0, math.rad(90))
+	part.Parent = effects
+	Animate.tween(part, duration, { Size = Vector3.new(0.2, diameter, diameter), Transparency = 1 })
+	Debris:AddItem(part, duration + 0.1)
+end
+
 -- Petite explosion de particules (aucune texture externe : texture intégrée).
 local function burst(position: Vector3, color: Color3, amount: number)
+	if reducedEffects() then
+		amount = math.max(4, math.floor(amount / 3))
+	end
 	local holder = Instance.new("Part")
 	holder.Anchored = true
 	holder.CanCollide = false
@@ -388,8 +425,13 @@ local function revealAnimation(creature: Creature)
 	local model, base = creature.model, creature.base
 	local style = species.behavior.revealStyle
 	local spin = if style == "Hop" or style == "Flag" then math.pi * 2 else math.pi
-	Audio.playAt(model.PrimaryPart :: BasePart, "Reveal")
-	burst(base.Position + Vector3.new(0, 2, 0), rarityColor(species.id), 18)
+	Audio.playAt(model.PrimaryPart :: BasePart, "Reveal", 1.1 - rarityOrder(species.id) * 0.06)
+	-- Plus l'espèce est rare, plus la révélation est marquée (particules, anneau dès « Rare »).
+	local order = rarityOrder(species.id)
+	burst(base.Position + Vector3.new(0, 2, 0), rarityColor(species.id), 12 + order * 6)
+	if order >= 3 then
+		ring(base.Position, rarityColor(species.id), 10 + order * 2, 0.5)
+	end
 	if style == "Flash" then
 		for _, light in model:GetDescendants() do
 			if light:IsA("PointLight") then
@@ -465,19 +507,7 @@ local function mutationReveal(creature: Creature, specimen: any): Model
 	MutationFx.attach(model, look)
 	Audio.play("Reveal", 1.35)
 	burst(pivot.Position + Vector3.new(0, 2.5, 0), color, 60)
-	-- Anneau qui s'élargit au sol.
-	local ring = Instance.new("Part")
-	ring.Shape = Enum.PartType.Cylinder
-	ring.Anchored = true
-	ring.CanCollide = false
-	ring.CanQuery = false
-	ring.Material = Enum.Material.Neon
-	ring.Color = color
-	ring.Size = Vector3.new(0.2, 2, 2)
-	ring.CFrame = CFrame.new(pivot.Position + Vector3.new(0, 0.2, 0)) * CFrame.Angles(0, 0, math.rad(90))
-	ring.Parent = effects
-	Animate.tween(ring, 0.6, { Size = Vector3.new(0.2, 16, 16), Transparency = 1 })
-	Debris:AddItem(ring, 0.7)
+	ring(pivot.Position, color, 16, 0.6)
 	Animate.run(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out, function(a, raw)
 		Animate.scale(model, Animate.lerp(0.7, 1.25, a))
 		model:PivotTo(pivot * C(0, math.sin(raw * math.pi) * 2.2, 0) * CFrame.Angles(0, raw * math.pi * 2, 0))
@@ -499,9 +529,17 @@ local function captureAnimation(creature: Creature, ownerUserId: number?)
 	local model = creature.model
 	local start = model:GetPivot()
 	local color = rarityColor(creature.speciesId)
-	Animate.run(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, function(a)
-		Animate.scale(model, Animate.lerp(1, 1.3, a))
+	local order = rarityOrder(creature.speciesId)
+	-- Écrasement puis étirement (anticipation) avant l'aspiration : la capture « claque ».
+	Animate.run(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, function(a)
+		Animate.scale(model, Animate.lerp(1, 0.82, a))
+		model:PivotTo(start * C(0, -0.25 * a, 0))
 	end)
+	Animate.run(0.18, Enum.EasingStyle.Back, Enum.EasingDirection.Out, function(a)
+		Animate.scale(model, Animate.lerp(0.82, 1.3, a))
+		model:PivotTo(start * C(0, 0.6 * a, 0))
+	end)
+	start = model:GetPivot()
 	local root = ownerRoot(ownerUserId)
 	local target = if root then root.Position + Vector3.new(0, 1, 0) else start.Position + Vector3.new(0, 8, 0)
 	if mine then
@@ -512,7 +550,10 @@ local function captureAnimation(creature: Creature, ownerUserId: number?)
 		model:PivotTo(CFrame.new(position) * start.Rotation * CFrame.Angles(0, a * math.pi * 6, 0))
 		Animate.scale(model, Animate.lerp(1.3, 0.06, a))
 	end)
-	burst(target, color, 40)
+	burst(target, color, 26 + order * 10)
+	if order >= 3 then
+		ring(target - Vector3.new(0, 1, 0), color, 8 + order * 2, 0.45)
+	end
 	destroyCreature(creature)
 	task.delay(1.4, function()
 		PropTracker.show(creature.propId, 0.8)

@@ -27,18 +27,27 @@ function ModelView.clear(viewport: ViewportFrame)
 	end
 end
 
--- Place `model` à l'origine dans le ViewportFrame avec une caméra cadrée sur sa hauteur.
+--[[
+	Place `model` à l'origine dans le ViewportFrame, caméra de trois quarts face.
+	Cadrage sur l'encombrement réel du modèle (et non une hauteur de référence par type
+	d'objet) : le coffre, large et bas, apparaissait trop gros sur les captures de la VM.
+]]
 function ModelView.frame(viewport: ViewportFrame, model: Model, kind: string, zoom: number?)
 	ModelView.clear(viewport)
 	model:PivotTo(CFrame.identity)
 	model.Parent = viewport
+	local box, size = model:GetBoundingBox()
 	local anchor = PropBuilder.FaceAnchors[kind]
-	local height = (if anchor then anchor.height else 4) * model:GetScale()
-	local distance = (height * 1.45 + 4) * (zoom or 1)
+	local height = math.max(size.Y, (if anchor then anchor.height else 4) * model:GetScale())
+	-- Rayon de la sphère englobante : le modèle tient entier quelle que soit sa rotation.
+	local radius = size.Magnitude / 2
+	local fov = 40
+	local distance = (radius / math.tan(math.rad(fov / 2)) * 1.08 + 0.5) * (zoom or 1)
+	local target = Vector3.new(0, box.Position.Y, 0)
+	local direction = Vector3.new(0.35, 0.3, -1).Unit
 	local camera = Instance.new("Camera")
-	camera.FieldOfView = 40
-	camera.CFrame =
-		CFrame.lookAt(Vector3.new(distance * 0.35, height * 0.62, -distance), Vector3.new(0, height * 0.5, 0))
+	camera.FieldOfView = fov
+	camera.CFrame = CFrame.lookAt(target + direction * distance, target + Vector3.new(0, height * 0.02, 0))
 	camera.Parent = viewport
 	viewport.CurrentCamera = camera
 end

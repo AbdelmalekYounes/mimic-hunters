@@ -132,15 +132,48 @@ function CollectionController.start(hudRefs: any)
 	CollectionPanel.build(refs.gui, refs.touch)
 	refreshStats()
 
-	refs.codexButton.Activated:Connect(function()
+	-- Pastille « ! » sur le bouton CODEX : quelque chose de nouveau à voir dans la collection.
+	local badge = Theme.text({
+		Name = "NewBadge",
+		Text = "!",
+		Font = Theme.Fonts.Title,
+		TextColor3 = Theme.Colors.Panel,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(1, -4, 0, 4),
+		Size = UDim2.fromOffset(24, 24),
+		Visible = false,
+		ZIndex = 3,
+		MaxTextSize = 18,
+		Parent = refs.codexButton,
+	})
+	badge.BackgroundTransparency = 0
+	badge.BackgroundColor3 = Theme.Colors.Pink
+	Theme.corner(12).Parent = badge
+	local buttonScale = Theme.create("UIScale", { Scale = 1, Parent = refs.codexButton }) :: UIScale
+	local function flagNew()
+		badge.Visible = true
+		buttonScale.Scale = 1.18
+		Animate.tween(buttonScale, 0.35, { Scale = 1 }, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+	end
+	local function toggle()
 		CollectionPanel.toggle()
-	end)
+		if CollectionPanel.isOpen() then
+			badge.Visible = false
+		end
+	end
+
+	refs.codexButton.Activated:Connect(toggle)
 	ContextActionService:BindAction("MH_Codex", function(_, state)
 		if state == Enum.UserInputState.Begin then
-			CollectionPanel.toggle()
+			toggle()
 		end
 		return Enum.ContextActionResult.Sink
 	end, false, Enum.KeyCode.C, Enum.KeyCode.ButtonSelect)
+	Remotes.get("CaptureResolved").OnClientEvent:Connect(function(payload)
+		if payload.success and (payload.isNew or payload.isNewMutation or #(payload.completed or {}) > 0) then
+			task.delay(1.5, flagNew)
+		end
+	end)
 
 	Remotes.get("CollectionSnapshot").OnClientEvent:Connect(function(view)
 		ClientState.applyCollectionSnapshot(view)
