@@ -275,3 +275,41 @@ describe("Musées — visites", function()
 		expect(#reply.entries).toBe(2)
 	end)
 end)
+
+describe("Musées — configuration des styles", function()
+	local MuseumStyles = Loader.shared("Config/MuseumStyles")
+
+	it("propose trois options gratuites par réglage, et une récompense verrouillée", function()
+		for _, kind in MuseumStyles.Kinds do
+			local free = 0
+			for _, option in MuseumStyles.options(kind) do
+				if not option.reward then
+					free += 1
+					expect(MuseumStyles.isAvailable(kind, option.id, nil)).toBe(true)
+				end
+			end
+			expect(free).toBe(3)
+			expect(MuseumStyles.get(kind, MuseumStyles.Defaults[kind]) ~= nil).toBe(true)
+		end
+		expect(MuseumStyles.isAvailable("pedestal", "pedestal_star", {})).toBe(false)
+		expect(MuseumStyles.isAvailable("pedestal", "pedestal_star", { pedestal_star = true })).toBe(true)
+		expect(MuseumStyles.isAvailable("wall", 12, nil)).toBe(false)
+	end)
+
+	it("retombe sur l'option par défaut pour une valeur inconnue", function()
+		expect(MuseumStyles.resolve("wall", "gold").id).toBe("lilac")
+		expect(MuseumStyles.resolve("theme", nil).id).toBe("mystic")
+		expect(MuseumStyles.resolve("lighting", "aurora").id).toBe("aurora")
+	end)
+
+	it("relie la récompense du socle Étoilé à un objectif", function()
+		local Objectives = Loader.shared("Config/Objectives")
+		local found = false
+		for _, objective in Objectives.list() do
+			if objective.reward.id == "pedestal_star" then
+				found = objective.reward.kind == "pedestal"
+			end
+		end
+		expect(found).toBe(true)
+	end)
+end)

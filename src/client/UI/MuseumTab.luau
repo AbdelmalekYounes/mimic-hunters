@@ -16,6 +16,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local MimicCatalog = require(Shared.Config.MimicCatalog)
 local Mutations = require(Shared.Config.Mutations)
+local MuseumStyles = require(Shared.Config.MuseumStyles)
 local Rarities = require(Shared.Config.Rarities)
 local CollectionQuery = require(Shared.Logic.CollectionQuery)
 local Remotes = require(Shared.Net.Remotes)
@@ -362,6 +363,69 @@ local function build(): Frame
 		ui.slots[slot] = makeSlotCard(slot)
 	end
 
+	-- Personnalisation (jalon 4) : quatre réglages, options gratuites + récompenses débloquées.
+	Theme.text({
+		Name = "StylesHeader",
+		LayoutOrder = 3,
+		Text = "Personnalisation (visible par les visiteurs)",
+		Font = Theme.Fonts.Title,
+		TextColor3 = C.Pink,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Size = UDim2.new(1, -10, 0, 26),
+		MaxTextSize = 18,
+		Parent = scroll,
+	})
+	ui.styleButtons = {}
+	local labels = { wall = "Murs", lighting = "Lumière", pedestal = "Socles", theme = "Thème" }
+	for index, kind in MuseumStyles.Kinds do
+		local row = Theme.create("Frame", {
+			Name = "Style_" .. kind,
+			LayoutOrder = 3 + index,
+			BackgroundTransparency = 1,
+			Size = UDim2.new(1, -10, 0, 34),
+			Parent = scroll,
+		}) :: Frame
+		Theme.text({
+			Text = labels[kind],
+			Font = Theme.Fonts.Bold,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Size = UDim2.new(0.18, 0, 1, 0),
+			MaxTextSize = 16,
+			Parent = row,
+		})
+		local options = Theme.create("Frame", {
+			BackgroundTransparency = 1,
+			Position = UDim2.fromScale(0.18, 0),
+			Size = UDim2.fromScale(0.82, 1),
+			Parent = row,
+		}) :: Frame
+		Theme.create("UIListLayout", {
+			FillDirection = Enum.FillDirection.Horizontal,
+			Padding = UDim.new(0, 6),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			Parent = options,
+		})
+		local list = MuseumStyles.options(kind)
+		ui.styleButtons[kind] = {}
+		for order, option in list do
+			local button = Theme.button({
+				Name = option.id,
+				Text = option.name,
+				LayoutOrder = order,
+				Size = UDim2.new(1 / #list, -6, 1, 0),
+				BackgroundColor3 = Theme.rgb(option.color):Lerp(Color3.fromRGB(30, 24, 48), 0.45),
+				StrokeColor = Theme.rgb(option.accent or option.color),
+				Radius = 10,
+				MaxTextSize = 14,
+				Parent = options,
+			})
+			button.Activated:Connect(function()
+				send("SetMuseumStyle", kind, option.id)
+			end)
+			ui.styleButtons[kind][option.id] = { button = button, option = option }
+		end
+	end
+
 	-- Sélecteur : recouvre l'onglet, au-dessus de la liste.
 	local picker = Theme.panel({
 		Name = "Picker",
@@ -480,8 +544,36 @@ local function build(): Frame
 	return page
 end
 
+local function refreshStyles()
+	local summary = ClientState.summary
+	local museum = summary and summary.museum
+	local unlocked: { [string]: boolean } = {}
+	for _, id in (summary and summary.cosmetics and summary.cosmetics.unlocked) or {} do
+		unlocked[id] = true
+	end
+	for kind, buttons in ui.styleButtons do
+		local current = MuseumStyles.resolve(kind, museum and museum[kind]).id
+		for id, entry in buttons do
+			local available = MuseumStyles.isAvailable(kind, id, unlocked)
+			local selected = id == current
+			entry.button.Text = if not available
+				then entry.option.name .. " (verrouillé)"
+				elseif selected then "✓ " .. entry.option.name
+				else entry.option.name
+			entry.button.AutoButtonColor = available and not selected
+			entry.button.TextTransparency = if available then 0 else 0.45
+			local stroke = entry.button:FindFirstChildOfClass("UIStroke")
+			if stroke then
+				stroke.Thickness = if selected then 4 else 2
+				stroke.Color = if selected then C.Mint else Theme.rgb(entry.option.accent or entry.option.color)
+			end
+		end
+	end
+end
+
 local function refresh()
 	refreshSlots()
+	refreshStyles()
 	if pickerSlot then
 		MuseumTab.refreshPicker()
 	end

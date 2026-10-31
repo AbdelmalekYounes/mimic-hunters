@@ -718,6 +718,42 @@ local function runTests(payload: any)
 		CollectionPanel.setOpen(false)
 	end)
 
+	check("musee.personnalisation", function()
+		local MuseumStyles = require(Shared.Config.MuseumStyles)
+		local mine = museumOf(player.UserId) :: Model
+		local reply = request("SetMuseumStyle", "MuseumResult", 5, "wall", "mint")
+		expect(reply and reply.ok, "style refusé : " .. tostring(reply and reply.reason))
+		task.wait(0.4)
+		reply = request("SetMuseumStyle", "MuseumResult", 5, "lighting", "aurora")
+		expect(reply and reply.ok, "lumière refusée : " .. tostring(reply and reply.reason))
+		task.wait(0.4)
+		local locked = request("SetMuseumStyle", "MuseumResult", 5, "wall", "doré")
+		expect(locked and not locked.ok and locked.reason == "Locked", "option inconnue acceptée")
+		local deadline = os.clock() + 3
+		while
+			os.clock() < deadline and not string.find(tostring(mine:GetAttribute("Styles")), "mint/aurora", 1, true)
+		do
+			task.wait(0.1)
+		end
+		expect(
+			string.find(tostring(mine:GetAttribute("Styles")), "mint/aurora", 1, true),
+			"styles du musée : " .. tostring(mine:GetAttribute("Styles"))
+		)
+		local wall = mine:FindFirstChild("WallBack") :: BasePart
+		local expected = MuseumStyles.get("wall", "mint").color
+		local c = wall.Color
+		expect(
+			math.abs(c.R * 255 - expected[1]) < 1.5 and math.abs(c.G * 255 - expected[2]) < 1.5,
+			"couleur des murs non appliquée"
+		)
+		-- « Première vitrine » atteinte plus haut : le socle Étoilé est débloqué.
+		local star = request("SetMuseumStyle", "MuseumResult", 5, "pedestal", "pedestal_star")
+		expect(star and star.ok, "socle Étoilé refusé : " .. tostring(star and star.reason))
+		task.wait(0.4)
+		frameMuseum(mine)
+		task.wait(VIEW_PAUSE)
+	end)
+
 	check("musee.visite_six_mimics", function()
 		local ready = nil
 		local conn = bus.OnClientEvent:Connect(function(kind, data)
