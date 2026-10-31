@@ -259,6 +259,33 @@ local function serverSuite()
 		end
 	end)
 
+	check("especes.variantes_reproductibles", function()
+		local SpecimenLook = require(Shared.Logic.SpecimenLook)
+		local species = MimicCatalog.get("trashling")
+		local lookA = SpecimenLook.compute(species, 777, "Standard")
+		local modelA1 = MimicModelBuilder.build(species.id, nil, lookA)
+		local modelA2 = MimicModelBuilder.build(species.id, nil, SpecimenLook.compute(species, 777, "Standard"))
+		local reference = MimicModelBuilder.build(species.id)
+		local function tintColor(model: Model): Color3?
+			for _, d in model:GetDescendants() do
+				if d:IsA("BasePart") and d:GetAttribute("Tint") then
+					return d.Color
+				end
+			end
+			return nil
+		end
+		expect(tintColor(modelA1) == tintColor(modelA2), "même graine, couleurs différentes")
+		expect(tintColor(modelA1) ~= tintColor(reference), "variation de couleur non appliquée")
+		local _, sizeA = modelA1:GetBoundingBox()
+		local _, sizeRef = reference:GetBoundingBox()
+		local ratio = sizeA.Y / sizeRef.Y
+		expect(math.abs(ratio - lookA.scale) < 0.02, string.format("taille %.3f, attendu %.3f", ratio, lookA.scale))
+		expect(math.abs(modelA1:GetPivot().Position.Y) < 0.05, "exemplaire mis à l'échelle hors du sol")
+		for _, m in { modelA1, modelA2, reference } do
+			m:Destroy()
+		end
+	end)
+
 	check("reseau.remote_events", function()
 		local folder = ReplicatedStorage:FindFirstChild("MimicRemotes")
 		expect(folder ~= nil, "dossier MimicRemotes absent")

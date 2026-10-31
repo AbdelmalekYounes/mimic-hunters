@@ -13,6 +13,7 @@ local MimicCatalog = require(Shared.Config.MimicCatalog)
 local Rarities = require(Shared.Config.Rarities)
 local PropBuilder = require(Shared.Builders.PropBuilder)
 local MimicModelBuilder = require(Shared.Builders.MimicModelBuilder)
+local SpecimenLook = require(Shared.Logic.SpecimenLook)
 local Remotes = require(Shared.Net.Remotes)
 
 local Client = script.Parent.Parent
@@ -193,7 +194,10 @@ local function showDiscovery(payload: any)
 		payload.discovered or 1,
 		MimicCatalog.count()
 	)
-	local model = MimicModelBuilder.build(species.id)
+	-- L'exemplaire réellement obtenu (couleurs et taille issues de sa graine).
+	local specimen = payload.specimen
+	local look = if specimen then SpecimenLook.compute(species, specimen.seed, specimen.mutation) else nil
+	local model = MimicModelBuilder.build(species.id, nil, look)
 	frameModel(refs.popupViewport, model, species.kind)
 	popupModel = model
 	refs.popup.Visible = true

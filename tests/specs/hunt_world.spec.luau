@@ -294,6 +294,34 @@ describe("HuntWorld — interactions simultanées", function()
 		expect(second.reason).toBe("AlreadyCapturing")
 	end)
 
+	it("crée un exemplaire individuel par capture, avec identifiant et graine serveur", function()
+		local world = veteranWorld(15)
+		local specimens = {}
+		for i = 1, 3 do
+			local events = captureShared(world, A, Fixtures.findHidden(world), i * 10)
+			local resolved = named(events, "CaptureResolved", A)[1].payload
+			expect(resolved.success).toBe(true)
+			local delta = named(events, "CollectionDelta", A)[1].payload
+			expect(delta.added.id).toBe(resolved.specimen.id)
+			expect(delta.summary.owned).toBe(i)
+			table.insert(specimens, resolved.specimen)
+		end
+		local ids, seeds = {}, {}
+		for _, s in specimens do
+			expect(ids[s.id]).toBeNil()
+			ids[s.id] = true
+			seeds[s.seed] = true
+			expect(s.rarity).toBe(Fixtures.MimicCatalog.get(s.speciesId).rarity)
+			expect(type(s.acquiredAt)).toBe("number")
+			expect(s.favorite).toBe(false)
+		end
+		local distinctSeeds = 0
+		for _ in seeds do
+			distinctSeeds += 1
+		end
+		expect(distinctSeeds).toBe(3)
+	end)
+
 	it("ne duplique jamais une récompense quand la requête est rejouée", function()
 		local world = veteranWorld(14)
 		local record = Fixtures.findHidden(world)
