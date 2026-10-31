@@ -126,6 +126,12 @@ test.cmd ─▶ tools/test-all.ps1
 | Musées (V0.3) | Lune + Studio · server / client-pc / client-mobile | 8 parcelles, attribution et file d'attente, rendu exact de 6 Mimics (couleurs, Chromatic, Spectral), refus (non possédé, doublon), retrait, réorganisation, libération, migration v2 → v3, reconnexion (ProfileService réel, stockage mémoire), MA BASE / VILLAGE, mode décoration, personnalisation visible, visite et protections |
 | Museum Hunt (V0.3) | Lune + Studio | lancement et refus, copies jamais révélées, bandes du scanner, portée, cachettes inventées, fin au temps, annulation (propriétaire, visiteur, sortie du jardin), répétition limitée, spam ; partie complète jouée par le vrai client (PC et mobile simulé) |
 | Performance (V0.3) | Studio · client | Parts par musée, lumières, Mimics animés plafonnés, temps d'image (indicatif) |
+| Sauvegardes concurrentes (V0.3.1) | Lune (ordonnanceur coopératif `tests/lib/Scheduler`) | deux chargements du même joueur, départ + fermeture, fermeture bornée pendant une panne, écriture appliquée mais réponse perdue, panne prolongée, enregistrement illisible ; 7 de ces tests échouent sur l'ancien code |
+| Vrai DataStore (V0.3.1) | **préparé, non exécuté** | `datastore-check.project.json` + `tests/datastore` (9 scénarios, DataStore dédié) ; script vérifié sur un DataStore simulé (`datastore_check.spec`) ; voir PRIVATE_TEST_PUBLISH.md |
+| Multijoueur à deux clients (V0.3.1) | Studio · multiplayer | 17 contrôles : parcelles, visites croisées, mutations identiques, mise à jour vue par le visiteur, requêtes forgées, collections privées, même Mimic, même défi, départ du propriétaire, réattribution |
+| Performance mesurée (V0.3.1) | Studio · server / client | Instances reconstruites par un style (0) et une vitrine (≤ 2 vitrines), Instances créées à la réouverture du panneau, requêtes de l'onglet Visites |
+| Guide et mesures de playtest (V0.3.1) | Studio · client + Lune | consigne MA BASE du guide ; parcours mesuré par `SessionMetrics` (7 étapes) sans envoi depuis Studio |
+| Types `--!strict` (V0.3.1) | luau-lsp | `tools/luau-analyze.ps1`, 0 erreur exigée |
 | Codex, inventaire, objectifs | Studio · client-pc / client-mobile | panneau dans l'écran, pages réellement visibles, codex découvert/manquant, fiche, favori aller-retour, objectif validé, titre affiché au-dessus du personnage |
 
 Contrôle de pertinence : en réintroduisant volontairement le bug de pivot corrigé en V0.1,

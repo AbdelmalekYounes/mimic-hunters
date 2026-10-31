@@ -190,4 +190,14 @@ function MimicCatalog.kindName(kind: string): string
 	return (Kinds :: any)[kind] or "objet"
 end
 
+-- Types d'objets masculins (pour l'article : « un coffre », « une chaise »).
+local Masculine = table.freeze({ Chest = true, Vending = true })
+
+-- Nom avec son article indéfini : « un coffre », « une boîte aux lettres », « un objet ».
+function MimicCatalog.kindWithArticle(kind: string): string
+	local known = (Kinds :: any)[kind] ~= nil
+	local article = if not known or (Masculine :: any)[kind] then "un" else "une"
+	return article .. " " .. MimicCatalog.kindName(kind)
+end
+
 return MimicCatalog

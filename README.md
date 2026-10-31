@@ -1,10 +1,15 @@
-# MIMIC HUNTERS — V0.3 (musées personnels)
+# MIMIC HUNTERS — V0.3.1 (validation, optimisation, équilibrage)
 
 Jeu Roblox multijoueur de chasse et de collection : des créatures, les **Mimics**, se
 déguisent en objets ordinaires. Le joueur les repère grâce à des indices, les examine,
 puis les stabilise avec un court minijeu pour les capturer.
 
 **Chercher → Détecter → Capturer → Découvrir → Collectionner.**
+
+V0.3.1 (branche `feature/v0.3.1-validation`) : version de qualité, sans nouveau contenu —
+audit technique, sauvegardes fiabilisées (accès concurrents, fermeture, données illisibles),
+tests multijoueurs à deux clients, optimisations mesurées, Museum Hunt rééquilibrée, guide de
+première session, mesures de playtest. Bilan : [docs/V031_VALIDATION.md](docs/V031_VALIDATION.md).
 
 Nouveautés de la V0.3 (branche `feature/v0.3-museums`) :
 - **musée personnel** pour chaque joueur, dans le Quartier des collectionneurs (bouton MA BASE) ;
@@ -65,14 +70,15 @@ Dans ce cas, mettez-le à jour avec `rojo plugin install`.
 Windows caché ; détails et limites dans [docs/TESTING.md](docs/TESTING.md) :
 
 ```bat
-test.cmd               :: ligne de commande + 4 sessions Roblox Studio, 84 tests (≈ 3 min 40)
+test.cmd               :: ligne de commande + 4 sessions Roblox Studio, 104 tests (≈ 4 min 20)
 test.cmd -SkipStudio   :: ligne de commande seulement (≈ 2 s)
 ```
 
 Rapport : `build/test-reports/latest.md`. Commandes individuelles :
 
 ```bash
-lune run tests/run          # 269 tests unitaires et d'intégration (logique pure)
+lune run tests/run          # 298 tests unitaires et d'intégration (logique pure)
+lune run tools/balance      # simulation d'équilibrage (Museum Hunt, mutations, Codex)
 lune run tests/run capture  # seulement les fichiers dont le nom contient « capture »
 lune run tests/check        # compile tous les fichiers .luau (vérification de syntaxe)
 selene src                  # lint (std Roblox)
@@ -142,6 +148,10 @@ docs/                  GAME_DESIGN, ARCHITECTURE, DATA_SCHEMA, TESTING, ROADMAP,
 - [docs/DATA_SCHEMA.md](docs/DATA_SCHEMA.md) — schéma du profil, migrations, sauvegarde et verrou de session
 - [docs/V03_VALIDATION.md](docs/V03_VALIDATION.md) — bilan de la V0.3 (musées, visites, Museum Hunt)
 - [docs/V031_AUDIT.md](docs/V031_AUDIT.md) — audit technique V0.3.1 (persistance, sécurité, performances, types)
+- [docs/V031_VALIDATION.md](docs/V031_VALIDATION.md) — bilan de la V0.3.1 et verdict
+- [docs/BALANCE.md](docs/BALANCE.md) — analyse d'équilibrage (simulations)
+- [docs/PLAYTEST_PLAN.md](docs/PLAYTEST_PLAN.md) — protocole de test avec 3 à 5 joueurs
+- [docs/PRIVATE_TEST_PUBLISH.md](docs/PRIVATE_TEST_PUBLISH.md) — préparer une publication privée (rien n'est publié)
 - [docs/TESTING.md](docs/TESTING.md) — tests automatisés Studio sans monopoliser le PC
 - [docs/VM_SETUP.md](docs/VM_SETUP.md) — VM VMware pour les tests graphiques (`test-vm.cmd`)
 

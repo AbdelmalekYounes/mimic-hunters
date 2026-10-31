@@ -180,3 +180,24 @@ s'aident ne gagnent chacun qu'un musée de plus.
 
 Les animations des Mimics exposés ne changent que l'affichage local (`PivotTo` sur les modèles
 répliqués) : rien n'est envoyé au serveur, et la vitrine solide les contient.
+
+## 10. Fiabilité, mesures et équilibrage (V0.3.1)
+
+| Module | Rôle | Testé |
+|---|---|---|
+| `Core/ProfileService` (révisé) | un chargement à la fois, libération ciblée et idempotente, fermeture bornée, `Corrupt`, `Degraded`, identifiant d'écriture | Lune (ordonnanceur coopératif) |
+| `Core/ProfileSchema` (révisé) | quarantaine des exemplaires illisibles, champs inconnus conservés | Lune |
+| `Core/SessionMetrics` | mesures de session (temps avant les premières fois, compteurs), pur | Lune + Studio |
+| `Services/AnalyticsServer` | AnalyticsService (entonnoir d'intégration, événements personnalisés), jeu publié seulement | revue de code (API Roblox) |
+| `Controllers/GuideController` | guide de première session (une consigne à la fois) | Studio |
+| `Map/MuseumBuilder` (révisé) | rendu incrémental des vitrines (clé par vitrine) | Studio (Instances comptées) |
+| `tools/balance.luau` | simulation d'équilibrage contre le vrai `MuseumCore` | — |
+
+**Performances mesurées** (Studio, avant → après) : style d'un musée 106 → 0 Instances
+reconstruites ; une vitrine 115 → 31 ; réouverture du panneau Collection ≈ 800 → 21 ;
+onglet Visites 10 → 1 requête. Mesures de comptage (Instances, requêtes), pas de temps
+d'image : celui-ci reste plafonné par la synchronisation verticale dans la VM.
+
+**Effets réduits** : éclats de mutation éteints au-delà de 20 studs, aucun clignotement ni
+changement de couleur rapide (indices `flicker`, `glitch`), pas d'éclair de révélation,
+exposés immobiles, pas de zoom d'ouverture du panneau, moins de particules, pas d'anneau.

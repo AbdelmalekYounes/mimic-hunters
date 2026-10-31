@@ -352,7 +352,7 @@ local function onInspectResult(payload: any)
 	end
 	if payload.result == "Ordinary" then
 		Audio.play("Ordinary")
-		ClientState.toast(string.format("Ce n'est qu'une %s ordinaire.", MimicCatalog.kindName(payload.kind)))
+		ClientState.toast(string.format("Ce n'est qu'%s ordinaire.", MimicCatalog.kindWithArticle(payload.kind)))
 		local prop = PropTracker.get(payload.propId)
 		if prop then
 			MimicVisuals.burst(prop:GetPivot().Position + Vector3.new(0, 2, 0), Color3.fromRGB(220, 220, 230), 6)
