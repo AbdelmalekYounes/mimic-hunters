@@ -63,6 +63,8 @@ type Exhibit = {
 }
 
 local exhibits: { [Model]: Exhibit } = {}
+-- Nombre de Mimics réellement animés à la dernière mise à jour (mesure de performance).
+local lastAnimated = 0
 local refs: any
 local sheet: any = {}
 local sheetModel: Model? = nil
@@ -160,6 +162,7 @@ local function animate(dt: number)
 	table.sort(candidates, function(a, b)
 		return a.distance < b.distance
 	end)
+	lastAnimated = math.min(#candidates, MuseumController.MaxAnimated)
 	for index, item in candidates do
 		local entry = item.entry
 		if index > MuseumController.MaxAnimated then
@@ -336,21 +339,67 @@ function MuseumController.sheet(): any
 	return sheet
 end
 
+-- Mesures (tests de performance) : Mimics exposés connus et animés.
+function MuseumController.stats(): any
+	local registered = 0
+	for _ in exhibits do
+		registered += 1
+	end
+	return { registered = registered, animated = lastAnimated, maxAnimated = MuseumController.MaxAnimated }
+end
+
 -- ─── Démarrage ─────────────────────────────────────────────────────────
+
+-- Le personnage est-il déjà dans son propre musée (parcelle) ?
+local function inOwnMuseum(): boolean
+	local plot = ClientState.museumPlot
+	local character = localPlayer.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if plot == nil or root == nil then
+		return false
+	end
+	for _, model in CollectionService:GetTagged("Museum") do
+		if model:GetAttribute("PlotIndex") == plot and model:IsA("Model") and model.PrimaryPart then
+			local offset = (root.Position - model.PrimaryPart.Position) * Vector3.new(1, 0, 1)
+			return offset.Magnitude < 22
+		end
+	end
+	return false
+end
+
+-- MA BASE : y aller ; déjà sur place, ouvre le mode décoration (onglet Musée).
+function MuseumController.base()
+	if inOwnMuseum() then
+		local CollectionPanel = require(Client.UI.CollectionPanel) :: any
+		CollectionPanel.setOpen(true)
+		CollectionPanel.showTab("Museum")
+		return
+	end
+	MuseumController.travel("base")
+end
 
 function MuseumController.start(hudRefs: any)
 	refs = hudRefs
 	buildSheet(refs.gui)
+	-- Appareils tactiles : budget d'animation réduit de moitié.
+	if refs.touch then
+		MuseumController.MaxAnimated = 6
+		MuseumController.EffectsDistance = 35
+	end
 
 	refs.baseButton.Activated:Connect(function()
-		MuseumController.travel("base")
+		MuseumController.base()
 	end)
 	refs.villageButton.Activated:Connect(function()
 		MuseumController.travel("village")
 	end)
 	ContextActionService:BindAction("MH_Travel", function(_, state, input)
 		if state == Enum.UserInputState.Begin then
-			MuseumController.travel(if input.KeyCode == Enum.KeyCode.B then "base" else "village")
+			if input.KeyCode == Enum.KeyCode.B then
+				MuseumController.base()
+			else
+				MuseumController.travel("village")
+			end
 		end
 		return Enum.ContextActionResult.Sink
 	end, false, Enum.KeyCode.B, Enum.KeyCode.V)

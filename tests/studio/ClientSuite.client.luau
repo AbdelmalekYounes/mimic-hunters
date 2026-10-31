@@ -646,6 +646,14 @@ local function runTests(payload: any)
 		-- Musée vide (capture d'écran).
 		frameMuseum(mine :: Model)
 		task.wait(VIEW_PAUSE)
+		-- Déjà chez soi : MA BASE ouvre directement le mode décoration.
+		MuseumController.base()
+		task.wait(0.4)
+		expect(
+			panel.Visible and panel:FindFirstChild("MuseumPage", true).Visible,
+			"MA BASE sur place n'ouvre pas le mode décoration"
+		)
+		CollectionPanel.setOpen(false)
 	end)
 
 	check("musee.exposer_et_examiner", function()
@@ -933,6 +941,62 @@ local function runTests(payload: any)
 		local again = waitPhase("refused", 3)
 		conn:Disconnect()
 		expect(again and again.reason == "Cooldown", "rejouer immédiatement : " .. tostring(again and again.reason))
+	end)
+
+	check("perf.budget_musees", function()
+		-- Mesures indicatives (Studio, bureau caché ou VM : pas un appareil réel).
+		local museumsFolder = workspace.Map:FindFirstChild("Museums") :: Folder
+		local parts, lights, perPlotMax = 0, 0, 0
+		for _, d in museumsFolder:GetDescendants() do
+			if d:IsA("BasePart") then
+				parts += 1
+			elseif d:IsA("PointLight") then
+				lights += 1
+			end
+		end
+		for _, model in CollectionServiceC:GetTagged("Museum") do
+			local n = 0
+			for _, d in model:GetDescendants() do
+				if d:IsA("BasePart") then
+					n += 1
+				end
+			end
+			perPlotMax = math.max(perPlotMax, n)
+		end
+		local function frameTime(seconds: number): number
+			local total, frames = 0, 0
+			local conn = game:GetService("RunService").RenderStepped:Connect(function(dt)
+				total += dt
+				frames += 1
+			end)
+			task.wait(seconds)
+			conn:Disconnect()
+			return if frames > 0 then total / frames * 1000 else -1
+		end
+		local collectorMuseum = museumOf(env.collector) :: Model
+		frameMuseum(collectorMuseum)
+		task.wait(0.5)
+		local museumMs = frameTime(3)
+		local stats = MuseumController.stats()
+		releaseCamera()
+		travel("village")
+		task.wait(1)
+		local villageMs = frameTime(3)
+		env.perf = {
+			museumParts = parts,
+			museumLights = lights,
+			partsPerMuseumMax = perPlotMax,
+			exhibitsKnown = stats.registered,
+			exhibitsAnimated = stats.animated,
+			maxAnimated = stats.maxAnimated,
+			frameMsMuseum = math.floor(museumMs * 10) / 10,
+			frameMsVillage = math.floor(villageMs * 10) / 10,
+		}
+		-- Budget (ARCHITECTURE.md) : ≤ 450 Parts par musée Mimics compris, ≤ 30 lumières
+		-- pour tout le quartier, animations plafonnées.
+		expect(perPlotMax <= 450, "Parts par musée : " .. perPlotMax)
+		expect(lights <= 30, "lumières du quartier : " .. lights)
+		expect(stats.animated <= stats.maxAnimated, "Mimics animés au-delà du budget : " .. stats.animated)
 	end)
 
 	check("musee.retour_village", function()
