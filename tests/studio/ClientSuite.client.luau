@@ -683,6 +683,41 @@ local function runTests(payload: any)
 		MuseumController.closeSheet()
 	end)
 
+	check("musee.onglet_vitrines_et_selecteur", function()
+		local MuseumTab = require(clientRoot.UI.MuseumTab) :: any
+		releaseCamera()
+		CollectionPanel.setOpen(true)
+		CollectionPanel.showTab("Museum")
+		task.wait(0.4)
+		local tabUi = MuseumTab.ui()
+		expect(tabUi.page.Visible, "onglet Musée non affiché")
+		for slot = 1, 6 do
+			local card = tabUi.slots[slot].card :: Frame
+			expect(
+				card.AbsoluteSize.X > 60 and inside(card, panel),
+				"vitrine " .. slot .. " invisible ou hors du panneau"
+			)
+		end
+		expect(string.find(tabUi.slots[1].title.Text, "Chairy", 1, true), "vitrine 1 : " .. tabUi.slots[1].title.Text)
+		expect(string.find(tabUi.slots[2].title.Text, "libre", 1, true), "vitrine 2 : " .. tabUi.slots[2].title.Text)
+		task.wait(VIEW_PAUSE)
+		MuseumTab.openPicker(2)
+		task.wait(0.4)
+		expect(tabUi.picker.Visible, "sélecteur non affiché")
+		local card = tabUi.pickerGrid:FindFirstChild(env.specimenId)
+		expect(card ~= nil, "exemplaire absent du sélecteur")
+		local marked = false
+		for _, d in (card :: Instance):GetDescendants() do
+			if d:IsA("TextLabel") and string.find(d.Text, "Exposé (vitrine 1)", 1, true) then
+				marked = true
+			end
+		end
+		expect(marked, "exemplaire déjà exposé non signalé dans le sélecteur")
+		task.wait(VIEW_PAUSE)
+		MuseumTab.closePicker()
+		CollectionPanel.setOpen(false)
+	end)
+
 	check("musee.visite_six_mimics", function()
 		local ready = nil
 		local conn = bus.OnClientEvent:Connect(function(kind, data)
