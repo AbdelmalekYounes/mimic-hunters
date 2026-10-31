@@ -889,6 +889,7 @@ function CollectionPanel.build(gui: ScreenGui, touch: boolean)
 	buildHeader(panel)
 	CollectionPanel.addTab("Codex", "Codex", buildCodexPage(), refreshCodex)
 	CollectionPanel.addTab("Inventory", "Inventaire", buildInventoryPage(), refreshInventory)
+	require(script.Parent.ObjectivesTab).register(CollectionPanel)
 
 	ui.close.Activated:Connect(function()
 		CollectionPanel.setOpen(false)

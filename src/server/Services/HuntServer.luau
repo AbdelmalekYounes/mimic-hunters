@@ -26,6 +26,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared.Config.GameConfig)
 local MimicCatalog = require(Shared.Config.MimicCatalog)
 local Mutations = require(Shared.Config.Mutations)
+local Objectives = require(Shared.Config.Objectives)
 local Rarities = require(Shared.Config.Rarities)
 local Rng = require(Shared.Logic.Rng)
 local Remotes = require(Shared.Net.Remotes)
@@ -71,6 +72,8 @@ function HuntServer.start()
 		serverId = serverId,
 		wallClock = os.time,
 		mutations = mutationSource,
+		objectives = Objectives.list(),
+		cosmeticDefaults = Objectives.defaults(),
 	})
 	local remotes = Remotes.setup()
 
@@ -111,12 +114,23 @@ function HuntServer.start()
 		(_G :: any).MimicProfiles = { service = profiles, backend = backend, name = backendName }
 	end
 
+	-- Titre équipé : attribut du joueur, lu par tous les clients (affiché au-dessus de la tête).
+	local function applyCosmetics(userId: number)
+		local player = Players:GetPlayerByUserId(userId)
+		local cosmetics = world:cosmeticsOf(userId)
+		if player then
+			player:SetAttribute("MimicTitle", if cosmetics then cosmetics.title else nil)
+		end
+	end
+
 	dispatch = function(events: { HuntWorld.Event })
 		for _, event in events do
 			if string.sub(event.name, 1, 1) == "_" then
 				-- Événement interne : jamais envoyé au client.
 				if event.name == "_ProfileChanged" and event.userId then
 					profiles:markDirty(event.userId, event.payload.important)
+				elseif event.name == "_CosmeticsChanged" and event.userId then
+					applyCosmetics(event.userId)
 				end
 				continue
 			end
@@ -243,6 +257,7 @@ function HuntServer.start()
 					if world:profileStatusOf(userId) ~= "Ready" then
 						releaseUntouched(userId)
 					end
+					applyCosmetics(userId)
 					return
 				end
 			end
@@ -265,6 +280,7 @@ function HuntServer.start()
 			if world:profileStatusOf(userId) ~= "Ready" then
 				releaseUntouched(userId)
 			end
+			applyCosmetics(userId)
 		else
 			world:addPlayer(userId, now(), nil, { ready = false, status = status })
 			retryLoad(player)

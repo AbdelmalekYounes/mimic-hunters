@@ -453,11 +453,24 @@ function HuntWorld._schemaContext(self: any, userId: number): ProfileSchema.Cont
 end
 
 function HuntWorld._newCollection(self: any, userId: number, profile: ProfileSchema.Profile): any
-	return Collection.new(userId, profile, {
+	local collection = Collection.new(userId, profile, {
 		now = self._wallClock,
 		objectives = self._objectives,
 		defaults = self._cosmeticDefaults,
 	})
+	-- Rattrapage : un objectif ajouté après coup est validé dès la connexion s'il est déjà atteint.
+	collection:evaluateObjectives()
+	return collection
+end
+
+-- Cosmétiques équipés (titre, couleur de scanner), ou nil si le profil n'est pas sûr.
+function HuntWorld.cosmeticsOf(self: any, userId: number): any
+	local player = self._players[userId]
+	if player == nil or not player.ready then
+		return nil
+	end
+	local cosmetics = player.inventory:profile().cosmetics
+	return { title = cosmetics.title, scannerColor = cosmetics.scannerColor }
 end
 
 --[[
@@ -669,13 +682,18 @@ function HuntWorld.setFavorite(self: any, userId: number, specimenId: any, value
 end
 
 function HuntWorld.equipCosmetic(self: any, userId: number, kind: any, id: any, now: number): ({ Event }, any)
-	return self:_collectionRequest(userId, now, function(player)
+	local events, reply = self:_collectionRequest(userId, now, function(player)
 		local ok, err = player.inventory:equip(kind, id)
 		if not ok then
 			return false, err
 		end
 		return true, { summary = player.inventory:summary() }
 	end)
+	-- Le titre est affiché à tous les joueurs : HuntServer met à jour l'attribut du joueur.
+	if reply.ok then
+		push(events, "_CosmeticsChanged", userId, self:cosmeticsOf(userId))
+	end
+	return events, reply
 end
 
 function HuntWorld.updateSettings(self: any, userId: number, settings: any, now: number): ({ Event }, any)

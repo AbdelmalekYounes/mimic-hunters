@@ -21,6 +21,7 @@ local ScannerController = require(script.Controllers.ScannerController)
 local CaptureController = require(script.Controllers.CaptureController)
 local CollectionController = require(script.Controllers.CollectionController)
 local TutorialController = require(script.Controllers.TutorialController)
+local TitleController = require(script.Controllers.TitleController)
 
 local refs = Hud.build()
 
@@ -34,6 +35,7 @@ ScannerController.start(refs)
 CaptureController.start(refs)
 CollectionController.start(refs)
 TutorialController.start(refs)
+TitleController.start()
 
 Remotes.get("MimicUpdate").OnClientEvent:Connect(function(payload)
 	ClientState.applyUpdate(payload)

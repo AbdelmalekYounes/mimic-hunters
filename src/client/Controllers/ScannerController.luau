@@ -21,6 +21,7 @@ local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared.Config.GameConfig)
 local MimicCatalog = require(Shared.Config.MimicCatalog)
+local Objectives = require(Shared.Config.Objectives)
 local Remotes = require(Shared.Net.Remotes)
 
 local Client = script.Parent.Parent
@@ -253,7 +254,10 @@ local function radar(root: BasePart)
 	sphere.Name = "ScanWave"
 	sphere.Shape = Enum.PartType.Ball
 	sphere.Material = Enum.Material.ForceField
-	sphere.Color = Theme.Colors.Cyan
+	-- Couleur de scanner équipée (récompense d'objectif), Cyan par défaut.
+	local summary = ClientState.summary
+	local cosmetic = Objectives.cosmetic(summary and summary.cosmetics and summary.cosmetics.scannerColor)
+	sphere.Color = if cosmetic then Theme.rgb(cosmetic.color) else Theme.Colors.Cyan
 	sphere.Anchored = true
 	sphere.CanCollide = false
 	sphere.CanQuery = false

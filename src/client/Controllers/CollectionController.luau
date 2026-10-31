@@ -13,6 +13,7 @@ local RunService = game:GetService("RunService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local MimicCatalog = require(Shared.Config.MimicCatalog)
 local Mutations = require(Shared.Config.Mutations)
+local Objectives = require(Shared.Config.Objectives)
 local Rarities = require(Shared.Config.Rarities)
 local MimicModelBuilder = require(Shared.Builders.MimicModelBuilder)
 local SpecimenLook = require(Shared.Logic.SpecimenLook)
@@ -157,10 +158,36 @@ function CollectionController.start(hudRefs: any)
 			end
 		end
 	end)
-	ClientState.CollectionChanged:Connect(refreshStats)
+	ClientState.CollectionChanged:Connect(function()
+		refreshStats()
+		-- Réglages du profil appliqués au client.
+		local settings = ClientState.summary and ClientState.summary.settings
+		if settings then
+			Audio.muted = settings.sfx == false
+			MutationFx.enabled = settings.reducedEffects ~= true
+		end
+	end)
 	Remotes.get("CaptureResolved").OnClientEvent:Connect(function(payload)
 		if payload.success then
 			showDiscovery(payload)
+			-- Objectifs atteints par cette capture : récompense annoncée tout de suite.
+			for index, id in payload.completed or {} do
+				for _, objective in Objectives.list() do
+					if objective.id == id then
+						task.delay(1 + index * 0.6, function()
+							Audio.play("Reveal", 1.8)
+							ClientState.toast(
+								string.format(
+									"Objectif « %s » atteint : %s débloqué !",
+									objective.title,
+									Objectives.rewardText(objective)
+								),
+								"mimic"
+							)
+						end)
+					end
+				end
+			end
 		end
 	end)
 

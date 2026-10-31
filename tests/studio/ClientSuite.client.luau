@@ -381,6 +381,37 @@ local function runTests(payload: any)
 		local bad = request("SetFavorite", "CollectionResult", 5, "S1-999999", true)
 		expect(bad and not bad.ok and bad.reason == "NotOwned", "favori d'un exemplaire non possédé accepté")
 		task.wait(VIEW_PAUSE)
+	end)
+
+	check("collection.objectifs_et_titre", function()
+		CollectionPanel.showTab("Objectives")
+		task.wait(0.3)
+		local page = panel:FindFirstChild("ObjectivesPage", true) :: Frame
+		expect(page and page.Visible, "onglet Objectifs non affiché")
+		local row = page:FindFirstChild("first_capture", true) :: Frame
+		local status = row and row:FindFirstChild("Status") :: TextLabel
+		expect(
+			status and status.Text == "✓",
+			"objectif « Première capture » non validé : " .. tostring(status and status.Text)
+		)
+		local pending = page:FindFirstChild("ten_captures", true) :: Frame
+		local progress = pending and pending:FindFirstChild("Status") :: TextLabel
+		expect(
+			progress and progress.Text == "1/10",
+			"progression « Dix captures » : " .. tostring(progress and progress.Text)
+		)
+		local reply = request("EquipCosmetic", "CollectionResult", 5, "title", "title_apprentice")
+		expect(reply and reply.ok, "titre refusé : " .. tostring(reply and reply.reason))
+		local deadline = os.clock() + 4
+		local head = player.Character and player.Character:FindFirstChild("Head")
+		while os.clock() < deadline and not (head and head:FindFirstChild("MimicTitle")) do
+			task.wait(0.1)
+		end
+		expect(player:GetAttribute("MimicTitle") == "title_apprentice", "attribut de titre non posé par le serveur")
+		expect(head and head:FindFirstChild("MimicTitle") ~= nil, "titre non affiché au-dessus du personnage")
+		local locked = request("EquipCosmetic", "CollectionResult", 5, "title", "title_master")
+		expect(locked and not locked.ok and locked.reason == "Locked", "titre verrouillé accepté")
+		task.wait(VIEW_PAUSE)
 		CollectionPanel.setOpen(false)
 	end)
 
