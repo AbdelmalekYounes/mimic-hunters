@@ -586,6 +586,148 @@ local function runTests(payload: any)
 		CollectionPanel.setOpen(false)
 	end)
 
+	-- ─── Musées (V0.3) ─────────────────────────────────────────────────
+	local MuseumController = clientRoot and require(clientRoot.Controllers.MuseumController) :: any
+	local CollectionServiceC = game:GetService("CollectionService")
+	local viewCamera = workspace.CurrentCamera
+
+	local function rootPart(): BasePart?
+		local current = player.Character
+		return current and current:FindFirstChild("HumanoidRootPart") :: BasePart?
+	end
+	local function museumOf(userId: number): Model?
+		for _, model in CollectionServiceC:GetTagged("Museum") do
+			if model:GetAttribute("OwnerUserId") == userId then
+				return model :: Model
+			end
+		end
+		return nil
+	end
+	-- Déplacement rapide par le réseau ; attend la réponse et le déplacement du personnage.
+	local function travel(kind: string, target: number?): any
+		local before = rootPart() and (rootPart() :: BasePart).Position
+		local reply = request("RequestTravel", "MuseumResult", 5, kind, target)
+		local deadline = os.clock() + 3
+		while os.clock() < deadline do
+			local now = rootPart() and (rootPart() :: BasePart).Position
+			if now and before and (now - before).Magnitude > 5 then
+				break
+			end
+			task.wait(0.1)
+		end
+		return reply
+	end
+	-- Caméra de présentation (captures d'écran de la VM) : vue de trois quarts sur un musée.
+	local function frameMuseum(model: Model, localOffset: CFrame?, localTarget: Vector3?)
+		local floor = model.PrimaryPart :: BasePart
+		viewCamera.CameraType = Enum.CameraType.Scriptable
+		local eye = floor.CFrame * (localOffset or CFrame.new(0, 15, -23))
+		camera.CFrame =
+			CFrame.lookAt(eye.Position, (floor.CFrame * CFrame.new(localTarget or Vector3.new(0, 2, 2))).Position)
+	end
+	local function releaseCamera()
+		viewCamera.CameraType = Enum.CameraType.Custom
+	end
+
+	check("musee.ma_base", function()
+		local deadline = os.clock() + 5
+		while ClientState.museumPlot == nil and os.clock() < deadline do
+			task.wait(0.1)
+		end
+		expect(ClientState.museumPlot ~= nil, "aucune parcelle reçue")
+		local mine = museumOf(player.UserId)
+		expect(mine ~= nil, "musée du joueur introuvable")
+		local reply = travel("base")
+		expect(reply and reply.ok, "MA BASE refusé : " .. tostring(reply and reply.reason))
+		local root = rootPart()
+		local distance = root
+			and ((root.Position - (mine :: Model).PrimaryPart.Position) * Vector3.new(1, 0, 1)).Magnitude
+		expect(distance and distance < 20, "personnage loin de son musée : " .. tostring(distance))
+		-- Musée vide (capture d'écran).
+		frameMuseum(mine :: Model)
+		task.wait(VIEW_PAUSE)
+	end)
+
+	check("musee.exposer_et_examiner", function()
+		expect(env.specimenId, "pré-requis : exemplaire capturé")
+		local reply = request("SetExhibit", "MuseumResult", 5, 1, env.specimenId)
+		expect(reply and reply.ok, "exposition refusée : " .. tostring(reply and reply.reason))
+		local mine = museumOf(player.UserId) :: Model
+		local model = nil
+		local deadline = os.clock() + 4
+		while os.clock() < deadline and model == nil do
+			local candidate = mine:FindFirstChild("Exhibits") and mine.Exhibits:FindFirstChild("Exhibit1")
+			if candidate and candidate:GetAttribute("SpecimenId") == env.specimenId then
+				model = candidate
+			end
+			task.wait(0.1)
+		end
+		expect(model ~= nil, "Mimic exposé absent du musée")
+		expect(
+			#ClientState.specimens >= 1 and ClientState.summary.museum.slots[1] == env.specimenId,
+			"résumé non mis à jour"
+		)
+		local dup = request("SetExhibit", "MuseumResult", 5, 2, env.specimenId)
+		expect(dup and not dup.ok and dup.reason == "AlreadyExhibited", "même exemplaire exposé deux fois")
+		MuseumController.inspect(model)
+		local sheet = MuseumController.sheet()
+		task.wait(0.3)
+		expect(sheet.panel.Visible, "fiche d'inspection non affichée")
+		expect(string.find(sheet.number.Text, env.specimenId, 1, true), "fiche : " .. sheet.number.Text)
+		expect(string.find(sheet.owner.Text, player.DisplayName, 1, true), "fiche : collectionneur absent")
+		local screen = hud.AbsoluteSize
+		local p, s = sheet.panel.AbsolutePosition, sheet.panel.AbsoluteSize
+		expect(p.X >= 0 and p.Y >= 0 and p.X + s.X <= screen.X + 1 and p.Y + s.Y <= screen.Y + 1, "fiche hors écran")
+		frameMuseum(mine, CFrame.new(-2, 7, -6), Vector3.new(-8, 2, 3))
+		task.wait(VIEW_PAUSE)
+		MuseumController.closeSheet()
+	end)
+
+	check("musee.visite_six_mimics", function()
+		local ready = nil
+		local conn = bus.OnClientEvent:Connect(function(kind, data)
+			if kind == "museum_ready" then
+				ready = data
+			end
+		end)
+		bus:FireServer("prepare_museum")
+		local deadline = os.clock() + 5
+		while ready == nil and os.clock() < deadline do
+			task.wait(0.1)
+		end
+		conn:Disconnect()
+		expect(ready and ready.plot, "collectionneur fictif non préparé")
+		env.collector = ready.ownerUserId
+		local reply = travel("museum", ready.ownerUserId)
+		expect(
+			reply and reply.ok and reply.plot == ready.plot,
+			"visite refusée : " .. tostring(reply and reply.reason)
+		)
+		local museumModel = museumOf(ready.ownerUserId) :: Model
+		local count = 0
+		for _, child in museumModel.Exhibits:GetChildren() do
+			if child:IsA("Model") and child:GetAttribute("Exhibit") then
+				count += 1
+			end
+		end
+		expect(count == 6, "Mimics visibles chez le collectionneur : " .. count)
+		-- Vue d'ensemble, puis gros plans Chromatic (vitrine 2) et Spectral (vitrine 3).
+		frameMuseum(museumModel)
+		task.wait(VIEW_PAUSE)
+		frameMuseum(museumModel, CFrame.new(1.5, 4.2, -2.5), Vector3.new(0, 2.6, 3))
+		task.wait(VIEW_PAUSE)
+		frameMuseum(museumModel, CFrame.new(5.5, 4.2, -2.5), Vector3.new(8, 2.6, 3))
+		task.wait(VIEW_PAUSE)
+	end)
+
+	check("musee.retour_village", function()
+		releaseCamera()
+		local reply = travel("village")
+		expect(reply and reply.ok, "retour au village refusé")
+		local root = rootPart()
+		expect(root and (root.Position * Vector3.new(1, 0, 1)).Magnitude < 25, "personnage loin du village")
+	end)
+
 	bus:FireServer("report", { results = results, env = env, capturedSpecies = capturedSpecies })
 end
 

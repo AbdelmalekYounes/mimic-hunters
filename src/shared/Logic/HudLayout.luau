@@ -26,6 +26,9 @@ export type Layout = {
 	capture: Rect,
 	-- Panneau Collection (codex, inventaire, objectifs) : modal, il peut recouvrir le reste.
 	panel: Rect,
+	-- V0.3 : déplacements rapides vers son musée et vers le Village.
+	base: Rect,
+	village: Rect,
 }
 
 local HudLayout = {}
@@ -52,8 +55,9 @@ function HudLayout.mode(width: number, height: number, touch: boolean): string
 end
 
 -- Haut de l'écran : compteur à gauche, bandeau du tutoriel à droite du compteur, ou dessous
--- quand la largeur manque. Les notifications passent sous le bandeau.
-local function topArea(width: number, compact: boolean): (Rect, Rect, Rect)
+-- quand la largeur manque. Boutons MA BASE / VILLAGE sous le compteur (ou sous le bandeau
+-- quand celui-ci est lui-même sous le compteur). Les notifications passent en dessous.
+local function topArea(width: number, compact: boolean): (Rect, Rect, Rect, Rect, Rect)
 	local counter = if compact then rect(MARGIN, 8, 200, 52) else rect(MARGIN, 10, 240, 62)
 	local bannerH = if compact then 48 else 58
 	local bannerW = math.clamp(width * 0.6, 280, 620)
@@ -67,15 +71,20 @@ local function topArea(width: number, compact: boolean): (Rect, Rect, Rect)
 	else
 		banner = rect(MARGIN, counter.y + counter.h + GAP, math.min(width - 2 * MARGIN, 620), bannerH)
 	end
+	local buttonW, buttonH = if compact then 96 else 116, if compact then 32 else 38
+	local below = math.max(counter.y + counter.h, if banner.x < besideX then banner.y + banner.h else 0) + GAP
+	local base = rect(MARGIN, below, buttonW, buttonH)
+	local village = rect(MARGIN + buttonW + GAP, below, buttonW, buttonH)
 	local toastW = math.clamp(width * 0.5, 260, 460)
-	local toasts = rect(width / 2 - toastW / 2, banner.y + banner.h + GAP, toastW, 140)
-	return counter, banner, toasts
+	local toastY = math.max(banner.y + banner.h, if banner.x < besideX then base.y + base.h else 0) + GAP
+	local toasts = rect(width / 2 - toastW / 2, toastY, toastW, 140)
+	return counter, banner, toasts, base, village
 end
 
 function HudLayout.compute(width: number, height: number, touch: boolean): Layout
 	local mode = HudLayout.mode(width, height, touch)
 	local compact = mode == "touchCompact"
-	local counter, banner, toasts = topArea(width, compact)
+	local counter, banner, toasts, base, village = topArea(width, compact)
 
 	local action: Rect, scan: Rect, codex: Rect, signal: Rect
 	local captureW: number, captureH: number, captureBottom: number
@@ -94,7 +103,8 @@ function HudLayout.compute(width: number, height: number, touch: boolean): Layou
 			signal = rect(width - right - signalW, scan.y - GAP - signalH, signalW, signalH)
 		end
 		captureW = 560
-		captureH = math.clamp(height - 2 * MARGIN - (banner.y + banner.h), 150, 200)
+		-- Sous le bas du bandeau et des boutons MA BASE / VILLAGE.
+		captureH = math.clamp(height - 2 * MARGIN - math.max(banner.y + banner.h, base.y + base.h), 150, 200)
 		captureBottom = MARGIN
 	else
 		local touchLarge = mode == "touch"
@@ -124,7 +134,10 @@ function HudLayout.compute(width: number, height: number, touch: boolean): Layou
 		captureW = columnLeft - GAP - MARGIN
 		if captureW < 260 then
 			captureW = width - 2 * MARGIN
-			y = math.max(math.min(signal.y, scan.y) - GAP - captureH, banner.y + banner.h + GAP)
+			y = math.max(
+				math.min(signal.y, scan.y) - GAP - captureH,
+				math.max(banner.y + banner.h, base.y + base.h) + GAP
+			)
 		end
 	end
 	local capture = rect(x, y, captureW, captureH)
@@ -150,6 +163,8 @@ function HudLayout.compute(width: number, height: number, touch: boolean): Layou
 		signal = signal,
 		capture = capture,
 		panel = panel,
+		base = base,
+		village = village,
 	}
 end
 

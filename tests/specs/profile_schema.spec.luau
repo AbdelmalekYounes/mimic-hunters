@@ -48,7 +48,7 @@ describe("ProfileSchema", function()
 
 	it("migre un profil V0.1 : chaque capture devient un exemplaire Standard", function()
 		local profile = ProfileSchema.migrate(v1Profile(), context(5000))
-		expect(profile.schemaVersion).toBe(2)
+		expect(profile.schemaVersion).toBe(ProfileSchema.Version)
 		expect(profile.tutorialDone).toBe(true)
 		expect(profile.stats.totalCaptures).toBe(3)
 		local bySpecies, ids = {}, {}

@@ -1,6 +1,6 @@
 --!strict
 --[[
-	ProfileSchema — format persistant d'un profil joueur (schéma v2) et migrations.
+	ProfileSchema — format persistant d'un profil joueur (schéma v3) et migrations.
 
 	Le profil est ce qui est écrit dans le DataStore (dans record.data, voir ProfileSession).
 	Il ne contient que des types acceptés par les DataStores : tables à clés texte,
@@ -20,7 +20,15 @@
 		settings = { sfx = boolean, reducedEffects = boolean },
 		stats = { totalCaptures, mutations = { [mutationId] = count } },
 		tutorialDone = boolean,
+		-- v3 (V0.3) :
+		museum = { slots = { specimenId | "" } × 6, wall, lighting, pedestal, theme },
+		hunts = { played, completed, best, museums = { ["<userId>"] = lastAt }, museumOrder = { "<userId>" } },
 	}
+
+	museum.slots ne contient QUE des identifiants d'exemplaires possédés (jamais une copie du
+	Mimic) ; "" = vitrine vide. Un même exemplaire n'apparaît que dans une vitrine.
+	hunts.museums : musées où le joueur a réussi au moins une trouvaille en Museum Hunt
+	(compteur de musées différents, borné à MaxHuntMuseums).
 
 	Specimen = { id, speciesId, rarity, mutation, seed, acquiredAt, favorite }
 	  - id : "S<userId d'origine>-<numéro>", attribué par le serveur, unique même après un futur échange ;
@@ -62,6 +70,24 @@ export type Profile = {
 	settings: { sfx: boolean, reducedEffects: boolean },
 	stats: { totalCaptures: number, mutations: { [string]: number } },
 	tutorialDone: boolean,
+	museum: Museum,
+	hunts: Hunts,
+}
+
+export type Museum = {
+	slots: { string },
+	wall: string,
+	lighting: string,
+	pedestal: string,
+	theme: string,
+}
+
+export type Hunts = {
+	played: number,
+	completed: number,
+	best: number,
+	museums: { [string]: number },
+	museumOrder: { string },
 }
 
 export type Context = {
@@ -73,7 +99,13 @@ export type Context = {
 
 local ProfileSchema = {}
 
-ProfileSchema.Version = 2
+ProfileSchema.Version = 3
+-- Vitrines du musée de départ.
+ProfileSchema.MuseumSlots = 6
+-- Musées différents mémorisés pour la Museum Hunt.
+ProfileSchema.MaxHuntMuseums = 200
+ProfileSchema.MuseumDefaults =
+	table.freeze({ wall = "lilac", lighting = "dusk", pedestal = "classic", theme = "mystic" })
 ProfileSchema.DefaultScannerColor = "Cyan"
 -- Limite de taille : ~140 octets par exemplaire, bien sous les 4 Mo d'une clé DataStore.
 ProfileSchema.MaxSpecimens = 2000
@@ -95,7 +127,22 @@ function ProfileSchema.new(now: number): Profile
 		settings = { sfx = true, reducedEffects = false },
 		stats = { totalCaptures = 0, mutations = {} },
 		tutorialDone = false,
+		museum = ProfileSchema.newMuseum(),
+		hunts = ProfileSchema.newHunts(),
 	}
+end
+
+function ProfileSchema.newMuseum(): Museum
+	local slots = {}
+	for i = 1, ProfileSchema.MuseumSlots do
+		slots[i] = ""
+	end
+	local d = ProfileSchema.MuseumDefaults
+	return { slots = slots, wall = d.wall, lighting = d.lighting, pedestal = d.pedestal, theme = d.theme }
+end
+
+function ProfileSchema.newHunts(): Hunts
+	return { played = 0, completed = 0, best = 0, museums = {}, museumOrder = {} }
 end
 
 function ProfileSchema.specimenId(userId: number, serial: number): string
@@ -164,6 +211,23 @@ migrations[1] = function(data: any, context: Context): any
 	end
 	profile.stats.mutations.Standard = profile.stats.totalCaptures
 	return profile
+end
+
+--[[
+	v2 (V0.2) → v3 (V0.3) : ajoute le musée (vitrines vides, styles par défaut) et les
+	statistiques de Museum Hunt. Tout le reste est conservé tel quel : aucun exemplaire,
+	objectif ou réglage n'est modifié.
+]]
+migrations[2] = function(data: any, _context: Context): any
+	local out = table.clone(data)
+	out.schemaVersion = 3
+	if type(out.museum) ~= "table" then
+		out.museum = ProfileSchema.newMuseum()
+	end
+	if type(out.hunts) ~= "table" then
+		out.hunts = ProfileSchema.newHunts()
+	end
+	return out
 end
 
 -- ─── Validation ────────────────────────────────────────────────────────
@@ -278,6 +342,47 @@ function ProfileSchema.sanitize(data: any, context: Context): (Profile, number)
 	if type(settings) == "table" then
 		profile.settings.sfx = settings.sfx ~= false
 		profile.settings.reducedEffects = settings.reducedEffects == true
+	end
+
+	-- Musée : seuls des exemplaires possédés, chacun dans une seule vitrine.
+	local museum = data.museum
+	if type(museum) == "table" then
+		local used: { [string]: boolean } = {}
+		if type(museum.slots) == "table" then
+			for i = 1, ProfileSchema.MuseumSlots do
+				local id = museum.slots[i]
+				if type(id) == "string" and id ~= "" then
+					if profile.specimens[id] ~= nil and not used[id] then
+						profile.museum.slots[i] = id
+						used[id] = true
+					else
+						-- Référence inexistante ou en double : vitrine vidée (l'exemplaire, s'il
+						-- existe, reste dans la collection).
+						dropped += 1
+					end
+				end
+			end
+		end
+		for _, kind in { "wall", "lighting", "pedestal", "theme" } do
+			profile.museum[kind] = str(museum[kind]) or ProfileSchema.MuseumDefaults[kind]
+		end
+	end
+
+	local hunts = data.hunts
+	if type(hunts) == "table" then
+		for _, key in { "played", "completed", "best" } do
+			local value = hunts[key]
+			profile.hunts[key] = if isNumber(value) then math.max(0, math.floor(value)) else 0
+		end
+		if type(hunts.museumOrder) == "table" and type(hunts.museums) == "table" then
+			for _, key in hunts.museumOrder do
+				local at = hunts.museums[key]
+				if str(key) and isNumber(at) and profile.hunts.museums[key] == nil then
+					profile.hunts.museums[key] = at
+					table.insert(profile.hunts.museumOrder, key)
+				end
+			end
+		end
 	end
 
 	local stats = data.stats

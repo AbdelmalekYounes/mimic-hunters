@@ -23,6 +23,13 @@ Remotes.ClientToServer = table.freeze({
 	"SetFavorite",
 	"EquipCosmetic",
 	"UpdateSettings",
+	-- Musées (V0.3) : toujours sur la collection du demandeur, destinations choisies par le serveur.
+	"RequestTravel",
+	"SetExhibit",
+	"MoveExhibit",
+	"SetMuseumStyle",
+	"RequestMuseums",
+	"StartMuseumHunt",
 })
 
 Remotes.ServerToClient = table.freeze({
@@ -41,6 +48,11 @@ Remotes.ServerToClient = table.freeze({
 	"ProfileStatus",
 	-- Capture d'un exemplaire muté, annoncée à tous les joueurs du serveur.
 	"RareCapture",
+	-- Musées (V0.3).
+	"MuseumInfo",
+	"MuseumResult",
+	"MuseumList",
+	"HuntUpdate",
 	"TutorialUpdate",
 	"Clue",
 	"Notice",

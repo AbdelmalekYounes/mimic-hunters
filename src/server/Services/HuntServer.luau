@@ -27,6 +27,7 @@ local GameConfig = require(Shared.Config.GameConfig)
 local MimicCatalog = require(Shared.Config.MimicCatalog)
 local Mutations = require(Shared.Config.Mutations)
 local Objectives = require(Shared.Config.Objectives)
+local MuseumStyles = require(Shared.Config.MuseumStyles)
 local Rarities = require(Shared.Config.Rarities)
 local Rng = require(Shared.Logic.Rng)
 local Remotes = require(Shared.Net.Remotes)
@@ -36,6 +37,7 @@ local HuntWorld = require(Server.Core.HuntWorld)
 local ProfileService = require(Server.Core.ProfileService)
 local MapLayout = require(Server.Map.MapLayout)
 local DataStoreBackend = require(script.Parent.DataStoreBackend)
+local MuseumServer = require(script.Parent.MuseumServer)
 
 local TICK_INTERVAL = 0.2
 local SAVE_STEP_INTERVAL = 1
@@ -74,6 +76,7 @@ function HuntServer.start()
 		mutations = mutationSource,
 		objectives = Objectives.list(),
 		cosmeticDefaults = Objectives.defaults(),
+		museumStyles = MuseumStyles,
 	})
 	local remotes = Remotes.setup()
 
@@ -82,6 +85,8 @@ function HuntServer.start()
 	end
 
 	local dispatch: (events: { HuntWorld.Event }) -> ()
+	-- Musées (V0.3) : créés après le dispatch, qui leur transmet ses événements internes.
+	local museum: any = nil
 
 	local backend, backendName = DataStoreBackend.choose(GameConfig.Save)
 	local inMemory = string.find(backendName, "mémoire", 1, true) ~= nil
@@ -131,6 +136,8 @@ function HuntServer.start()
 					profiles:markDirty(event.userId, event.payload.important)
 				elseif event.name == "_CosmeticsChanged" and event.userId then
 					applyCosmetics(event.userId)
+				elseif museum then
+					museum.handle(event)
 				end
 				continue
 			end
@@ -258,6 +265,7 @@ function HuntServer.start()
 						releaseUntouched(userId)
 					end
 					applyCosmetics(userId)
+					museum.refresh(userId)
 					return
 				end
 			end
@@ -285,10 +293,26 @@ function HuntServer.start()
 			world:addPlayer(userId, now(), nil, { ready = false, status = status })
 			retryLoad(player)
 		end
+		-- Parcelle et musée (même sans profil sûr : musée vide, aucune modification possible).
+		museum.onPlayerReady(userId)
 		if pendingReady[userId] then
 			pendingReady[userId] = nil
 			dispatch((world:clientReady(userId, now())))
 		end
+	end
+
+	museum = MuseumServer.start({
+		world = world,
+		remotes = remotes,
+		dispatch = function(events)
+			dispatch(events)
+		end,
+		studio = studio,
+		rng = Rng.new(seed + 7),
+	})
+	if studio then
+		-- selene: allow(global_usage)
+		(_G :: any).MimicMuseum = museum
 	end
 
 	world:populate(now())
@@ -301,6 +325,8 @@ function HuntServer.start()
 		local userId = player.UserId
 		pendingReady[userId] = nil
 		local data = world:getProfile(userId)
+		-- Musée d'abord : défis annulés, parcelle libérée (les exemplaires restent au profil).
+		museum.onPlayerRemoving(userId)
 		dispatch(world:removePlayer(userId, now()))
 		if profiles:status(userId) then
 			task.spawn(function()

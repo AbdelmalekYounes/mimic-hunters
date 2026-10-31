@@ -35,6 +35,7 @@ export type Options = {
 	objectives: { Objective }?,
 	-- Cosmétiques disponibles sans objectif (couleur de scanner par défaut, etc.).
 	defaults: { [string]: boolean }?,
+	museumStyles: any?,
 }
 
 local Collection = {}
@@ -47,6 +48,8 @@ function Collection.new(userId: number, profile: ProfileSchema.Profile, options:
 	self._now = options.now
 	self._objectives = options.objectives or {}
 	self._defaults = options.defaults or {}
+	-- Config/MuseumStyles (options gratuites et récompenses) ; nil = styles refusés.
+	self._museumStyles = options.museumStyles
 	-- Index dérivés (non persistés).
 	self._owned = 0
 	self._bySpecies = {} :: { [string]: number }
@@ -113,6 +116,10 @@ local function conditionMet(self: any, condition: any): boolean
 		return self:discoveredCount() >= (condition.count or 1)
 	elseif condition.type == "mutation" then
 		return (profile.stats.mutations[condition.mutation] or 0) > 0
+	elseif condition.type == "exhibits" then
+		return self:exhibitedCount() >= (condition.count or 1)
+	elseif condition.type == "museums" then
+		return #profile.hunts.museumOrder >= (condition.count or 1)
 	end
 	return false
 end
@@ -272,6 +279,202 @@ function Collection.setSettings(self: any, settings: any): (boolean, string?)
 	return true, nil
 end
 
+-- ─── Musée (V0.3) ──────────────────────────────────────────────────────
+--[[
+	Les vitrines ne stockent que des identifiants d'exemplaires POSSÉDÉS. Exposer ne crée,
+	ne copie ni ne déplace aucun exemplaire : il reste dans la collection, la vitrine le
+	référence. Un exemplaire n'est jamais référencé par deux vitrines.
+]]
+
+local function validSlot(slot: any): boolean
+	return type(slot) == "number" and slot == math.floor(slot) and slot >= 1 and slot <= ProfileSchema.MuseumSlots
+end
+
+function Collection.slotOf(self: any, specimenId: string): number?
+	for i, id in self._profile.museum.slots do
+		if id == specimenId then
+			return i
+		end
+	end
+	return nil
+end
+
+function Collection.exhibitedCount(self: any): number
+	local n = 0
+	for _, id in self._profile.museum.slots do
+		if id ~= "" then
+			n += 1
+		end
+	end
+	return n
+end
+
+-- Expose `specimenId` dans la vitrine `slot` (remplace l'occupant éventuel).
+function Collection.exhibit(self: any, slot: any, specimenId: any): (boolean, any)
+	if not validSlot(slot) then
+		return false, "BadSlot"
+	end
+	if type(specimenId) ~= "string" or self._profile.specimens[specimenId] == nil then
+		return false, "NotOwned"
+	end
+	local current = self:slotOf(specimenId)
+	if current == slot then
+		return true, { completed = {} }
+	end
+	if current ~= nil then
+		return false, "AlreadyExhibited"
+	end
+	self._profile.museum.slots[slot] = specimenId
+	self._profile.updatedAt = self._now()
+	return true, { completed = self:evaluateObjectives() }
+end
+
+function Collection.clearSlot(self: any, slot: any): (boolean, string?)
+	if not validSlot(slot) then
+		return false, "BadSlot"
+	end
+	self._profile.museum.slots[slot] = ""
+	self._profile.updatedAt = self._now()
+	return true, nil
+end
+
+-- Échange le contenu de deux vitrines (réorganisation ; une vitrine vide est permise).
+function Collection.moveExhibit(self: any, from: any, to: any): (boolean, string?)
+	if not validSlot(from) or not validSlot(to) or from == to then
+		return false, "BadSlot"
+	end
+	local slots = self._profile.museum.slots
+	slots[from], slots[to] = slots[to], slots[from]
+	self._profile.updatedAt = self._now()
+	return true, nil
+end
+
+-- Style du musée : option gratuite, ou récompense déjà débloquée.
+function Collection.setMuseumStyle(self: any, kind: any, id: any): (boolean, string?)
+	local styles = self._museumStyles
+	if styles == nil or type(kind) ~= "string" or table.find(styles.Kinds, kind) == nil then
+		return false, "BadKind"
+	end
+	if not styles.isAvailable(kind, id, self._profile.cosmetics.unlocked) then
+		return false, "Locked"
+	end
+	self._profile.museum[kind] = id
+	self._profile.updatedAt = self._now()
+	return true, nil
+end
+
+--[[
+	Ce que le musée affiche : exemplaire de chaque vitrine (ou false), styles, statistiques.
+	Une référence devenue invalide est affichée comme vitrine vide (jamais d'erreur).
+]]
+function Collection.museumView(self: any): any
+	local profile = self._profile
+	local slots, mutations, species = {}, {}, {}
+	local exhibited = 0
+	for i = 1, ProfileSchema.MuseumSlots do
+		local specimen = profile.specimens[profile.museum.slots[i] or ""]
+		if specimen then
+			slots[i] = self:specimenView(specimen)
+			exhibited += 1
+			mutations[specimen.mutation] = true
+			species[specimen.speciesId] = true
+		else
+			slots[i] = false
+		end
+	end
+	local mutationCount, speciesCount = 0, 0
+	for _ in mutations do
+		mutationCount += 1
+	end
+	for _ in species do
+		speciesCount += 1
+	end
+	return {
+		slots = slots,
+		styles = {
+			wall = profile.museum.wall,
+			lighting = profile.museum.lighting,
+			pedestal = profile.museum.pedestal,
+			theme = profile.museum.theme,
+		},
+		stats = {
+			discovered = self:discoveredCount(),
+			owned = self._owned,
+			totalCaptures = profile.stats.totalCaptures,
+			exhibited = exhibited,
+			mutationsExhibited = mutationCount,
+			speciesExhibited = speciesCount,
+		},
+	}
+end
+
+-- Espèces que les copies de la Museum Hunt peuvent imiter : celles exposées, sinon possédées.
+function Collection.huntSources(self: any): { any }
+	local list = {}
+	local view = self:museumView()
+	for _, specimen in view.slots do
+		if specimen then
+			table.insert(list, specimen)
+		end
+	end
+	if #list == 0 then
+		local bySpecies = {}
+		for _, specimen in self._profile.specimens do
+			if bySpecies[specimen.speciesId] == nil then
+				bySpecies[specimen.speciesId] = self:specimenView(specimen)
+			end
+		end
+		for _, specimen in bySpecies do
+			table.insert(list, specimen)
+		end
+		table.sort(list, function(a, b)
+			return a.id < b.id
+		end)
+	end
+	return list
+end
+
+--[[
+	Résultat d'une Museum Hunt jouée chez `ownerId`. Le record est personnel ; le compteur de
+	musées différents n'augmente qu'une fois par musée (et seulement avec au moins une
+	trouvaille) : rejouer le même défi, seul ou à deux comptes, ne fait rien gagner de plus.
+]]
+function Collection.recordHunt(self: any, ownerId: number, score: number, found: number, total: number): any
+	local hunts = self._profile.hunts
+	local now = self._now()
+	hunts.played += 1
+	if found >= total and total > 0 then
+		hunts.completed += 1
+	end
+	local newRecord = score > hunts.best
+	if newRecord then
+		hunts.best = score
+	end
+	local key = tostring(ownerId)
+	local newMuseum = false
+	if found > 0 and hunts.museums[key] == nil then
+		hunts.museums[key] = now
+		table.insert(hunts.museumOrder, key)
+		newMuseum = true
+		while #hunts.museumOrder > ProfileSchema.MaxHuntMuseums do
+			local oldest = table.remove(hunts.museumOrder, 1)
+			if oldest then
+				hunts.museums[oldest] = nil
+			end
+		end
+	elseif hunts.museums[key] ~= nil then
+		hunts.museums[key] = now
+	end
+	self._profile.updatedAt = now
+	return {
+		best = hunts.best,
+		newRecord = newRecord,
+		newMuseum = newMuseum,
+		museums = #hunts.museumOrder,
+		completed = self:evaluateObjectives(),
+	}
+end
+
 -- ─── Vues envoyées au client ───────────────────────────────────────────
 
 function Collection.specimenView(_self: any, s: ProfileSchema.Specimen): any
@@ -318,6 +521,19 @@ function Collection.summary(self: any): any
 			unlocked = unlocked,
 		},
 		settings = { sfx = profile.settings.sfx, reducedEffects = profile.settings.reducedEffects },
+		museum = {
+			slots = table.clone(profile.museum.slots),
+			wall = profile.museum.wall,
+			lighting = profile.museum.lighting,
+			pedestal = profile.museum.pedestal,
+			theme = profile.museum.theme,
+		},
+		hunts = {
+			played = profile.hunts.played,
+			completed = profile.hunts.completed,
+			best = profile.hunts.best,
+			museums = #profile.hunts.museumOrder,
+		},
 	}
 end
 

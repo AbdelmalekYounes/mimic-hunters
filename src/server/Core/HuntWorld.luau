@@ -91,6 +91,7 @@ function HuntWorld.new(options: any)
 	self._objectives = options.objectives or {}
 	self._mutations = options.mutations
 	self._cosmeticDefaults = options.cosmeticDefaults or {}
+	self._museumStyles = options.museumStyles
 	self._slotList = {} :: { Slot }
 	self._slots = {} :: { [string]: Slot }
 	for _, spec in options.slots do
@@ -457,6 +458,7 @@ function HuntWorld._newCollection(self: any, userId: number, profile: ProfileSch
 		now = self._wallClock,
 		objectives = self._objectives,
 		defaults = self._cosmeticDefaults,
+		museumStyles = self._museumStyles,
 	})
 	-- Rattrapage : un objectif ajouté après coup est validé dès la connexion s'il est déjà atteint.
 	collection:evaluateObjectives()

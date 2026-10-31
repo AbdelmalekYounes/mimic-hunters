@@ -24,6 +24,8 @@ type Entry = {
 	wisps: { BasePart },
 	light: PointLight?,
 	baseTransparency: number,
+	-- Au-delà de cette distance de la caméra : plus d'animation (lumière coupée).
+	maxDistance: number?,
 }
 
 local MutationFx = {}
@@ -50,6 +52,17 @@ local function step(dt: number)
 		end
 		if not MutationFx.enabled then
 			continue
+		end
+		if entry.maxDistance then
+			local camera = workspace.CurrentCamera
+			local far = camera ~= nil
+				and (camera.CFrame.Position - model:GetPivot().Position).Magnitude > entry.maxDistance
+			if entry.light then
+				entry.light.Enabled = not far
+			end
+			if far then
+				continue
+			end
 		end
 		if entry.mutation == "Chromatic" then
 			local rgb = SpecimenLook.chromaticAt(entry.look.body, t)
@@ -82,7 +95,7 @@ local function step(dt: number)
 end
 
 -- Enregistre un modèle construit avec une apparence (SpecimenLook) ; sans effet si Standard.
-function MutationFx.attach(model: Model, look: any)
+function MutationFx.attach(model: Model, look: any, maxDistance: number?)
 	if look == nil or (look.mutation ~= "Chromatic" and look.mutation ~= "Spectral") then
 		return
 	end
@@ -98,6 +111,7 @@ function MutationFx.attach(model: Model, look: any)
 		wisps = {},
 		light = nil,
 		baseTransparency = look.transparency or 0,
+		maxDistance = maxDistance,
 	}
 	local pivot = model:GetPivot()
 	for _, child in model:GetDescendants() do

@@ -198,7 +198,7 @@ describe("Persistance — bout en bout", function()
 
 	it("ne touche jamais à un profil d'une version plus récente", function()
 		local backend, env = MemoryBackend.new(), environment()
-		local future = { schemaVersion = 3, futureField = "garder" }
+		local future = { schemaVersion = ProfileSchema.Version + 1, futureField = "garder" }
 		backend:poke("player_" .. A, { data = future, meta = {} })
 		local one = server(backend, env, "job1", 39)
 		join(one, A)

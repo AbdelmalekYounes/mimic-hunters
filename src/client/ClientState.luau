@@ -32,6 +32,9 @@ local ClientState = {
 	specimens = {} :: { any },
 	specimensById = {} :: { [string]: any },
 	profileStatus = "Loading",
+	-- Musée (V0.3) : parcelle attribuée par le serveur, ou file d'attente.
+	museumPlot = nil :: number?,
+	museumWaiting = false,
 	tutorialStep = "Done",
 	tutorialPropId = nil :: string?,
 	attemptActive = false,
@@ -39,6 +42,7 @@ local ClientState = {
 	MimicChanged = Signal.new(), -- (info: MimicInfo, previousState: string?)
 	CollectionChanged = Signal.new(), -- (reason: "snapshot" | "added" | "updated" | "summary", specimen?)
 	ProfileStatusChanged = Signal.new(), -- (status)
+	MuseumChanged = Signal.new(), -- () parcelle, vitrines ou résultat d'une action de musée
 	TutorialChanged = Signal.new(), -- (step, propId)
 	AttemptChanged = Signal.new(), -- (active: boolean)
 	Toast = Signal.new(), -- (text, kind)

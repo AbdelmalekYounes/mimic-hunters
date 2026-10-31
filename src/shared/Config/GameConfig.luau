@@ -9,7 +9,7 @@
 ]]
 
 local GameConfig = {
-	Version = "0.2.0",
+	Version = "0.3.0",
 
 	Hunt = {
 		-- Nombre de Mimics partagés cachés simultanément dans le monde.
@@ -91,6 +91,10 @@ local GameConfig = {
 		Pulse = { capacity = 6, refillPerSecond = 5 },
 		-- Favoris, cosmétiques, réglages.
 		Collection = { capacity = 8, refillPerSecond = 3 },
+		-- Musées (V0.3) : vitrines et styles, déplacements rapides, Museum Hunt.
+		Museum = { capacity = 8, refillPerSecond = 2 },
+		Travel = { capacity = 3, refillPerSecond = 0.5 },
+		Hunt = { capacity = 6, refillPerSecond = 3 },
 	},
 
 	-- Sauvegardes (voir ProfileService pour le détail des délais).
