@@ -35,6 +35,9 @@ local cosmetics: { Cosmetic } = {
 	{ id = "title_apprentice", kind = "title", name = "Apprenti chasseur", color = { 146, 214, 120 } },
 	{ id = "title_whisper", kind = "title", name = "Murmure spectral", color = { 132, 236, 255 } },
 	{ id = "title_master", kind = "title", name = "Maître des Mimics", color = { 255, 210, 90 } },
+	-- V0.3 : musée.
+	{ id = "title_explorer", kind = "title", name = "Explorateur de musées", color = { 255, 150, 210 } },
+	{ id = "pedestal_star", kind = "pedestal", name = "Socles Étoilés", color = { 255, 220, 100 } },
 }
 
 local objectives: { Objective } = {
@@ -79,6 +82,21 @@ local objectives: { Objective } = {
 		description = "Découvre les six espèces de Mimics.",
 		condition = { type = "species", count = 6 },
 		reward = { id = "title_master", kind = "title" },
+	},
+	-- V0.3 : exposer, puis visiter les musées des autres.
+	{
+		id = "first_exhibit",
+		title = "Première vitrine",
+		description = "Expose un Mimic dans ton musée.",
+		condition = { type = "exhibits", count = 1 },
+		reward = { id = "pedestal_star", kind = "pedestal" },
+	},
+	{
+		id = "museum_explorer",
+		title = "Explorateur de musées",
+		description = "Réussis une Museum Hunt dans 3 musées différents.",
+		condition = { type = "museums", count = 3 },
+		reward = { id = "title_explorer", kind = "title" },
 	},
 }
 
@@ -126,6 +144,18 @@ function Objectives.progress(objective: Objective, summary: any): (number, numbe
 	elseif condition.type == "mutation" then
 		local count = summary.mutations and summary.mutations[condition.mutation] or 0
 		return math.min(count, 1), 1
+	elseif condition.type == "exhibits" then
+		local target = condition.count or 1
+		local exhibited = 0
+		for _, id in (summary.museum and summary.museum.slots) or {} do
+			if id ~= "" then
+				exhibited += 1
+			end
+		end
+		return math.min(exhibited, target), target
+	elseif condition.type == "museums" then
+		local target = condition.count or 1
+		return math.min(summary.hunts and summary.hunts.museums or 0, target), target
 	end
 	return 0, 1
 end
@@ -138,6 +168,8 @@ function Objectives.rewardText(objective: Objective): string
 	end
 	if cosmetic.kind == "title" then
 		return string.format("Titre « %s »", cosmetic.name)
+	elseif cosmetic.kind == "pedestal" then
+		return cosmetic.name .. " pour ton musée"
 	end
 	return string.format("Couleur de scanner %s", cosmetic.name)
 end

@@ -17,7 +17,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local StudioTestService = game:GetService("StudioTestService")
 
-local SUITE_TIMEOUT = 120
+-- V0.3 : la suite client (musées, Museum Hunt, pauses pour captures) dure ~100 s.
+local SUITE_TIMEOUT = 300
 local suiteStart = os.clock()
 local args = StudioTestService:GetTestArgs() or {}
 local suite = if type(args) == "table" then args.suite else nil
@@ -120,6 +121,64 @@ local MimicModelBuilder = require(Shared.Builders.MimicModelBuilder)
 local Remotes = require(Shared.Net.Remotes)
 local MapLayout = require(ServerRoot.Map.MapLayout)
 
+-- Musées (V0.3) : service exposé par HuntServer en Studio.
+-- selene: allow(global_usage)
+local museum = (_G :: any).MimicMuseum
+
+-- Profil d'un collectionneur fictif : 6 exemplaires (dont un Chromatic et un Spectral), tous exposés.
+local function collectorProfile(userId: number): any
+	local list = {
+		{ "chairy", "Standard" },
+		{ "lumino", "Chromatic" },
+		{ "posty", "Spectral" },
+		{ "trashling", "Standard" },
+		{ "chompy", "Standard" },
+		{ "vendoo", "Standard" },
+	}
+	local profile = {
+		schemaVersion = 3,
+		createdAt = 0,
+		updatedAt = 0,
+		nextSerial = #list + 1,
+		specimens = {},
+		codex = {},
+		grants = {},
+		grantOrder = {},
+		objectives = {},
+		cosmetics = { scannerColor = "Cyan", unlocked = {} },
+		settings = { sfx = true, reducedEffects = false },
+		stats = { totalCaptures = #list, mutations = {} },
+		tutorialDone = true,
+		museum = { slots = {}, wall = "night", lighting = "aurora", pedestal = "crystal", theme = "mystic" },
+		hunts = { played = 0, completed = 0, best = 0, museums = {}, museumOrder = {} },
+	}
+	for i, spec in list do
+		local id = string.format("S%d-%d", userId, i)
+		profile.specimens[id] = {
+			id = id,
+			speciesId = spec[1],
+			rarity = MimicCatalog.get(spec[1]).rarity,
+			mutation = spec[2],
+			seed = 5000 + i * 37,
+			acquiredAt = i,
+			favorite = false,
+		}
+		profile.codex[spec[1]] = { discoveredAt = 0, order = i, captured = 1, mutations = { [spec[2]] = true } }
+		profile.museum.slots[i] = id
+	end
+	return profile
+end
+
+local function exhibitModels(refs: any): { Model }
+	local out = {}
+	for _, child in refs.exhibits:GetChildren() do
+		if child:IsA("Model") and child:GetAttribute("Exhibit") then
+			table.insert(out, child)
+		end
+	end
+	return out
+end
+
 local function slotPosition(slotId: string): Vector3
 	local slot = world:slot(slotId)
 	return Vector3.new(slot.position.X + 3, 3, slot.position.Z)
@@ -161,7 +220,10 @@ local function playCapture(userId: number, position: Vector3, started: any, plan
 		while os.clock() < target do
 			task.wait()
 		end
-		local now = os.clock()
+		-- Horodatage = instant visé : un à-coup de Studio (jusqu'à 0,5 s) ne transforme pas une
+		-- réussite prévue en raté. Cette suite teste la logique serveur ; la précision réelle
+		-- des impulsions par le réseau est testée par la suite client.
+		local now = if os.clock() - target < 0.5 then target else os.clock()
 		local events, reply = world:pulse(userId, position, started.attemptId, now - stageStart, 0.12, now)
 		for _, e in events do
 			table.insert(all, e)
@@ -505,6 +567,192 @@ local function serverSuite()
 		service:release(C, final)
 	end)
 
+	-- ─── Musées (V0.3) ─────────────────────────────────────────────────
+	check("musee.quartier_et_parcelles", function()
+		expect(museum ~= nil, "_G.MimicMuseum absent")
+		local folder = workspace.Map:FindFirstChild("Museums")
+		expect(folder ~= nil, "Workspace.Map.Museums absent")
+		local count = 0
+		for _, model in CollectionService:GetTagged("Museum") do
+			count += 1
+			local pedestals = 0
+			for i = 1, 6 do
+				if model:FindFirstChild("Pedestal" .. i) then
+					pedestals += 1
+				end
+			end
+			expect(pedestals == 6, model.Name .. " : socles " .. pedestals)
+			local sign = model:FindFirstChild("HuntSign")
+			expect(sign and sign:FindFirstChild("HuntPrompt"), model.Name .. " : panneau Museum Hunt absent")
+		end
+		expect(count == 8, "musées construits : " .. count)
+	end)
+
+	local M = -4004
+	local mRefs: any = nil
+	check("musee.rendu_six_mimics_et_mutations", function()
+		world:addPlayer(M, os.clock(), collectorProfile(M))
+		museum.onPlayerReady(M)
+		local plot = museum.core:plotOf(M)
+		expect(plot ~= nil, "aucune parcelle attribuée")
+		mRefs = museum.plots[plot]
+		expect(string.find(mRefs.nameLabel.Text, "Musée de", 1, true), "enseigne : " .. mRefs.nameLabel.Text)
+		expect(
+			mRefs.model:GetAttribute("Styles") == "night/aurora/crystal/mystic",
+			"styles : " .. tostring(mRefs.model:GetAttribute("Styles"))
+		)
+		local models = exhibitModels(mRefs)
+		expect(#models == 6, "Mimics exposés : " .. #models)
+		local SpecimenLook = require(Shared.Logic.SpecimenLook)
+		for _, model in models do
+			local slot = model:GetAttribute("Slot")
+			local id = string.format("S%d-%d", M, slot)
+			expect(
+				model:GetAttribute("SpecimenId") == id,
+				"vitrine " .. slot .. " : " .. tostring(model:GetAttribute("SpecimenId"))
+			)
+			local pedestal = mRefs.pedestals[slot]
+			local top = pedestal.Position.Y + pedestal.Size.Y / 2
+			expect(math.abs(model:GetPivot().Position.Y - top) < 0.05, "vitrine " .. slot .. " : Mimic hors du socle")
+			-- Apparence exacte : couleur des parties teintées = celle de SpecimenLook.
+			local species = MimicCatalog.get(model:GetAttribute("SpeciesId"))
+			local look = SpecimenLook.compute(species, model:GetAttribute("Seed"), model:GetAttribute("Mutation"))
+			for _, d in model:GetDescendants() do
+				if d:IsA("BasePart") and d:GetAttribute("Tint") then
+					local expected = Color3.fromRGB(look.body[1], look.body[2], look.body[3])
+					expect(
+						(d.Color.R - expected.R) ^ 2 + (d.Color.G - expected.G) ^ 2 < 1e-4,
+						"vitrine " .. slot .. " : couleur personnelle perdue"
+					)
+					break
+				end
+			end
+			local mutation = model:GetAttribute("Mutation")
+			if mutation == "Chromatic" then
+				expect(
+					model.PrimaryPart and model.PrimaryPart:FindFirstChild("MutationGlow"),
+					"Chromatic sans éclat en vitrine"
+				)
+			elseif mutation == "Spectral" then
+				local wisps, translucent = 0, false
+				for _, d in model:GetDescendants() do
+					if d:IsA("BasePart") and d:GetAttribute("Wisp") then
+						wisps += 1
+					elseif d:IsA("BasePart") and d:GetAttribute("Tint") and d.Transparency > 0.3 then
+						translucent = true
+					end
+				end
+				expect(wisps == 3 and translucent, "Spectral sans transparence ou lueurs en vitrine")
+			end
+		end
+		expect(world:inventoryOf(M):owned() == 6, "exposer a modifié la collection")
+	end)
+
+	check("musee.exposition_refus_et_retrait", function()
+		local core = museum.core
+		local _, dup = core:setExhibit(M, 1, string.format("S%d-%d", M, 2), os.clock())
+		expect(not dup.ok and dup.reason == "AlreadyExhibited", "doublon accepté : " .. tostring(dup.reason))
+		local _, foreign = core:setExhibit(M, 1, "S-1001-1", os.clock())
+		expect(not foreign.ok and foreign.reason == "NotOwned", "exemplaire non possédé accepté")
+		task.wait(0.5)
+		museum.run((core:setExhibit(M, 6, nil, os.clock())))
+		expect(#exhibitModels(mRefs) == 5, "retrait non rendu")
+		task.wait(0.5)
+		museum.run((core:moveExhibit(M, 1, 6, os.clock())))
+		local moved = mRefs.exhibits:FindFirstChild("Exhibit6")
+		expect(moved and moved:GetAttribute("SpecimenId") == string.format("S%d-1", M), "réorganisation non rendue")
+	end)
+
+	check("musee.sauvegarde_reconnexion_studio", function()
+		-- Vrai ProfileService du serveur : le musée survit à un départ puis un retour.
+		-- selene: allow(global_usage)
+		local service = (_G :: any).MimicProfiles.service
+		local R = -6006
+		local status = service:load(R)
+		expect(status == "Ready", "chargement : " .. tostring(status))
+		world:addPlayer(R, os.clock(), collectorProfile(R))
+		museum.onPlayerReady(R)
+		task.wait(0.3)
+		museum.run((museum.core:moveExhibit(R, 2, 5, os.clock())))
+		task.wait(0.3)
+		museum.run((museum.core:setStyle(R, "theme", "fair", os.clock())))
+		local saved = world:getProfile(R)
+		museum.onPlayerRemoving(R)
+		world:removePlayer(R, os.clock())
+		expect(service:release(R, saved), "sauvegarde finale échouée")
+		local again, data = service:load(R)
+		expect(again == "Ready", "rechargement : " .. tostring(again))
+		world:addPlayer(R, os.clock(), data)
+		museum.onPlayerReady(R)
+		local refs = museum.plots[museum.core:plotOf(R)]
+		local five = refs.exhibits:FindFirstChild("Exhibit5")
+		expect(five and five:GetAttribute("SpecimenId") == string.format("S%d-2", R), "vitrine 5 après reconnexion")
+		expect(five:GetAttribute("Mutation") == "Chromatic", "mutation perdue après reconnexion")
+		expect(
+			refs.exhibits:FindFirstChild("Exhibit2")
+				and refs.exhibits.Exhibit2:GetAttribute("SpecimenId") == string.format("S%d-5", R),
+			"vitrine 2 après reconnexion"
+		)
+		expect(string.find(refs.model:GetAttribute("Styles"), "/fair", 1, true), "thème perdu après reconnexion")
+		local final = world:getProfile(R)
+		museum.onPlayerRemoving(R)
+		world:removePlayer(R, os.clock())
+		service:release(R, final)
+	end)
+
+	check("chasse.objets_trouvailles_et_annulation", function()
+		local MuseumLayoutS = require(ServerRoot.Map.MuseumLayout)
+		local core = museum.core
+		local VIS = -7007
+		world:addPlayer(VIS, os.clock(), collectorProfile(VIS))
+		museum.onPlayerReady(VIS)
+		local plot = core:plotOf(M)
+		local sign = MuseumLayoutS.toWorld(plot, MuseumLayoutS.HuntSign)
+		local events, reply = core:startHunt(VIS, M, sign, os.clock())
+		museum.run(events)
+		expect(reply.ok, "défi refusé : " .. tostring(reply.reason))
+		local refs = museum.plots[plot]
+		local spawned = 0
+		for _, child in refs.hunt:GetChildren() do
+			if child:IsA("Model") and CollectionService:HasTag(child, "MimicProp") then
+				spawned += 1
+				expect(
+					string.sub(child:GetAttribute("PropId"), 1, 2) == "MH",
+					"identifiant d'objet : " .. tostring(child:GetAttribute("PropId"))
+				)
+				expect(child:GetAttribute("Copy") == nil, "l'objet révèle s'il abrite une copie")
+			end
+		end
+		expect(spawned == 8, "objets du jardin : " .. spawned)
+		-- Une copie trouvée disparaît ; le vrai Mimic reste dans sa vitrine.
+		local hunt = core:huntOf(VIS)
+		for _, entry in hunt.props do
+			if entry.copy then
+				local spot = MuseumLayoutS.toWorld(plot, MuseumLayoutS.HuntSpots[entry.spot])
+				museum.run((core:huntInspect(VIS, spot, entry.propId, os.clock())))
+				expect(refs.hunt:FindFirstChild(entry.propId) == nil, "copie trouvée toujours présente")
+				break
+			end
+		end
+		expect(#exhibitModels(refs) >= 5, "vitrines du propriétaire touchées par le défi")
+		-- Le propriétaire part pendant le défi : défi annulé, objets retirés, musée fermé.
+		museum.onPlayerRemoving(M)
+		world:removePlayer(M, os.clock())
+		expect(core:huntOf(VIS) == nil, "défi toujours actif après le départ du propriétaire")
+		expect(#refs.hunt:GetChildren() == 0, "objets de chasse restés après annulation")
+		expect(world:inventoryOf(VIS):profile().hunts.played == 0, "un défi annulé a été compté")
+		museum.onPlayerRemoving(VIS)
+		world:removePlayer(VIS, os.clock())
+	end)
+
+	check("musee.liberation_parcelle", function()
+		museum.onPlayerRemoving(M)
+		world:removePlayer(M, os.clock())
+		expect(museum.core:plotOf(M) == nil, "parcelle toujours attribuée")
+		expect(mRefs.nameLabel.Text == "Parcelle libre", "enseigne : " .. mRefs.nameLabel.Text)
+		expect(#exhibitModels(mRefs) == 0, "Mimics restés exposés")
+	end)
+
 	world:removePlayer(A, os.clock())
 	world:removePlayer(B, os.clock())
 	check("joueurs.retrait_faux_joueurs", function()
@@ -521,6 +769,14 @@ local reports: { [number]: any } = {}
 bus.OnServerEvent:Connect(function(player, kind, data)
 	if kind == "report" then
 		reports[player.UserId] = data
+	elseif kind == "prepare_museum" then
+		-- Collectionneur fictif avec 6 Mimics exposés (Chromatic et Spectral compris) à visiter.
+		local V = -5005
+		if world:inventoryOf(V) == nil then
+			world:addPlayer(V, os.clock(), collectorProfile(V))
+			museum.onPlayerReady(V)
+		end
+		bus:FireClient(player, "museum_ready", { ownerUserId = V, plot = museum.core:plotOf(V) })
 	elseif kind == "prepare_mutation" then
 		-- Prépare une capture rare pour le vrai client : mutation imposée (hook Studio),
 		-- personnage placé à côté d'un Mimic caché, Mimic révélé pour ce joueur.
@@ -608,9 +864,9 @@ local function clientSuite()
 	if player == nil then
 		return nil
 	end
-	local report = askClient(player, { device = args.device }, 60)
+	local report = askClient(player, { device = args.device }, 180)
 	check("client.rapport_recu", function()
-		expect(report ~= nil, "aucun rapport du client en 60 s")
+		expect(report ~= nil, "aucun rapport du client en 180 s")
 	end)
 	if report then
 		for _, r in report.results or {} do

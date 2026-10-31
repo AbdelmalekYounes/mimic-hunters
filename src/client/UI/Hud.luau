@@ -34,6 +34,8 @@ export type Refs = {
 	actionButton: TextButton,
 	actionHint: TextLabel,
 	codexButton: TextButton,
+	baseButton: TextButton,
+	villageButton: TextButton,
 	capture: Frame,
 	captureTitle: TextLabel,
 	gauge: Frame,
@@ -182,6 +184,26 @@ function Hud.build(): Refs
 		Parent = gui,
 	})
 	keyHint(codexButton, "C", touch)
+
+	-- ── Déplacements rapides (V0.3) : son musée, retour au Village ──
+	local baseButton = Theme.button({
+		Name = "Base",
+		Text = "MA BASE",
+		BackgroundColor3 = Color3.fromRGB(120, 70, 150),
+		StrokeColor = C.Pink,
+		MaxTextSize = 16,
+		Parent = gui,
+	})
+	keyHint(baseButton, "B", touch)
+	local villageButton = Theme.button({
+		Name = "Village",
+		Text = "VILLAGE",
+		BackgroundColor3 = Color3.fromRGB(50, 100, 120),
+		StrokeColor = C.Cyan,
+		MaxTextSize = 16,
+		Parent = gui,
+	})
+	keyHint(villageButton, "V", touch)
 
 	-- ── Lecture du scanner ──
 	local signal = Theme.panel({
@@ -403,6 +425,8 @@ function Hud.build(): Refs
 		codex = codexButton,
 		signal = signal,
 		capture = capture,
+		base = baseButton,
+		village = villageButton,
 	}
 	local function applyLayout()
 		local size = gui.AbsoluteSize
@@ -435,6 +459,8 @@ function Hud.build(): Refs
 		actionButton = actionButton,
 		actionHint = actionHint,
 		codexButton = codexButton,
+		baseButton = baseButton,
+		villageButton = villageButton,
 		capture = capture,
 		captureTitle = captureTitle,
 		gauge = gauge,

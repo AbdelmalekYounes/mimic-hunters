@@ -19,10 +19,10 @@ local SCREENS = {
 }
 
 -- Éléments toujours affichés (ou presque) qui ne doivent jamais se chevaucher.
-local PERSISTENT = { "counter", "banner", "action", "scan", "codex", "signal" }
+local PERSISTENT = { "counter", "banner", "action", "scan", "codex", "signal", "base", "village" }
 -- Pendant le minijeu, ces éléments restent visibles à côté du panneau de capture.
 -- (Le signal est masqué au début d'une capture.)
-local BESIDE_CAPTURE = { "counter", "banner", "action", "scan", "codex" }
+local BESIDE_CAPTURE = { "counter", "banner", "action", "scan", "codex", "base", "village" }
 
 local function describeRect(r)
 	return string.format("(%d,%d %dx%d)", r.x, r.y, r.w, r.h)
@@ -37,7 +37,9 @@ describe("HudLayout", function()
 		end)
 
 		it(screen.name .. " : tout tient dans l'écran", function()
-			for _, key in { "counter", "banner", "action", "scan", "codex", "signal", "capture", "panel" } do
+			for _, key in
+				{ "counter", "banner", "action", "scan", "codex", "signal", "capture", "panel", "base", "village" }
+			do
 				local r = layout[key]
 				if not HudLayout.inside(r, screen.w, screen.h) then
 					error(key .. " sort de l'écran " .. describeRect(r), 0)
@@ -91,6 +93,16 @@ describe("HudLayout", function()
 		expect(layout.action.y).toBe(517 - 24 - 62)
 		expect(layout.scan.y).toBe(517 - 102 - 86)
 		expect(layout.counter.x).toBe(12)
+	end)
+
+	it("prend en charge toutes les tailles testées, et pas en dessous de la hauteur minimale", function()
+		for _, screen in SCREENS do
+			expect(screen.h >= HudLayout.MinHeight).toBe(true)
+		end
+		-- Vue de jeu PC de 667×232 (mesurée dans la VM) : le minijeu ne peut plus tenir sous le
+		-- HUD, d'où la limite explicite.
+		local tiny = HudLayout.compute(667, 232, false)
+		expect(HudLayout.inside(tiny.signal, 667, 232)).toBe(false)
 	end)
 
 	it("détecte chevauchements et débordements", function()

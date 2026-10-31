@@ -25,7 +25,7 @@ param(
 	[string[]]$Sessions = @("server", "client", "mobile", "multiplayer"),
 	[switch]$Visible,
 	[switch]$Screenshots,
-	[int]$StudioTimeoutSec = 420
+	[int]$StudioTimeoutSec = 900
 )
 
 $ErrorActionPreference = "Stop"

@@ -1,4 +1,4 @@
-# MIMIC HUNTERS — V0.2 (collection persistante)
+# MIMIC HUNTERS — V0.3 (musées personnels)
 
 Jeu Roblox multijoueur de chasse et de collection : des créatures, les **Mimics**, se
 déguisent en objets ordinaires. Le joueur les repère grâce à des indices, les examine,
@@ -6,7 +6,13 @@ puis les stabilise avec un court minijeu pour les capturer.
 
 **Chercher → Détecter → Capturer → Découvrir → Collectionner.**
 
-Nouveautés de la V0.2 (branche `feature/v0.2-collection`) :
+Nouveautés de la V0.3 (branche `feature/v0.3-museums`) :
+- **musée personnel** pour chaque joueur, dans le Quartier des collectionneurs (bouton MA BASE) ;
+- **6 vitrines** pour exposer ses vrais exemplaires, mutations comprises, animés et examinables ;
+- **personnalisation** (murs, lumière, socles, thème) et **visites** des musées des autres joueurs ;
+- **Museum Hunt** : une chasse de 75 s aux copies de Mimics cachées dans le jardin d'un musée.
+
+Nouveautés de la V0.2 :
 - **collection persistante** (DataStore, verrou de session, sauvegarde après chaque capture) ;
 - chaque capture est un **exemplaire individuel** (identifiant, rareté, apparence unique, date, favori) ;
 - deux **mutations** cosmétiques rares : Chromatic (4 %) et Spectral (1,5 %) ;
@@ -59,14 +65,14 @@ Dans ce cas, mettez-le à jour avec `rojo plugin install`.
 Windows caché ; détails et limites dans [docs/TESTING.md](docs/TESTING.md) :
 
 ```bat
-test.cmd               :: ligne de commande + 4 sessions Roblox Studio, 60 tests (≈ 2 min)
+test.cmd               :: ligne de commande + 4 sessions Roblox Studio, 84 tests (≈ 3 min 40)
 test.cmd -SkipStudio   :: ligne de commande seulement (≈ 2 s)
 ```
 
 Rapport : `build/test-reports/latest.md`. Commandes individuelles :
 
 ```bash
-lune run tests/run          # 223 tests unitaires et d'intégration (logique pure)
+lune run tests/run          # 269 tests unitaires et d'intégration (logique pure)
 lune run tests/run capture  # seulement les fichiers dont le nom contient « capture »
 lune run tests/check        # compile tous les fichiers .luau (vérification de syntaxe)
 selene src                  # lint (std Roblox)
@@ -89,7 +95,10 @@ et lancez `luau-lsp analyze` avec les définitions Roblox et un `sourcemap.json`
 | Scanner | `E` | bouton SCAN | X |
 | Examiner / Capturer | `F` ou clic sur l'objet | toucher l'objet ou bouton | Y |
 | Impulsion (minijeu) | `Espace` ou clic | bouton IMPULSION | A |
-| Collection (codex, inventaire, objectifs) | `C` | bouton CODEX | Select |
+| Collection (codex, inventaire, objectifs, musée, visites) | `C` | bouton CODEX | Select |
+| Mon musée (sur place : mode décoration) | `B` | bouton MA BASE | — |
+| Retour au Village | `V` | bouton VILLAGE | — |
+| Examiner une vitrine / lancer la Museum Hunt | `G` / `E` (invites) | toucher l'invite | — |
 
 ## Arborescence
 
@@ -124,6 +133,7 @@ docs/                  GAME_DESIGN, ARCHITECTURE, ROADMAP, V01_VALIDATION, scree
 - [docs/V01_VALIDATION.md](docs/V01_VALIDATION.md) — ce qui est implémenté, testé, et les limites
 - [docs/V02_VALIDATION.md](docs/V02_VALIDATION.md) — bilan de la V0.2 (sauvegardes, collection, mutations, objectifs)
 - [docs/DATA_SCHEMA.md](docs/DATA_SCHEMA.md) — schéma du profil, migrations, sauvegarde et verrou de session
+- [docs/V03_VALIDATION.md](docs/V03_VALIDATION.md) — bilan de la V0.3 (musées, visites, Museum Hunt)
 - [docs/TESTING.md](docs/TESTING.md) — tests automatisés Studio sans monopoliser le PC
 - [docs/VM_SETUP.md](docs/VM_SETUP.md) — VM VMware pour les tests graphiques (`test-vm.cmd`)
 

@@ -1,4 +1,4 @@
-# MIMIC HUNTERS — Game Design (V0.2)
+# MIMIC HUNTERS — Game Design (V0.3)
 
 ## 1. Promesse
 
@@ -159,7 +159,55 @@ Scanner : un bip par barre de signal, de plus en plus aigu. Capture : écrasemen
 particules et anneau dosés selon la rareté. Pastille « ! » sur CODEX quand il y a du nouveau.
 Réglages Sons et Effets réduits, sauvegardés.
 
-## 13. Hors périmètre V0.2 (volontairement)
+## 13. Hors périmètre V0.2 (rappel)
 
 Économie et monnaies, achats Robux, échanges, musée, base personnelle, PvP, mutations avancées,
 événements. Le modèle de données les prépare (voir DATA_SCHEMA.md) sans les commencer.
+
+## 14. Musées personnels (V0.3)
+
+Boucle : **Chercher → Capturer → Collectionner → Exposer → Visiter → Découvrir.**
+
+Chaque joueur reçoit une parcelle dans le **Quartier des collectionneurs**, au nord du Village
+(~7 s à pied, ou bouton MA BASE). Son musée : une salle cute-creepy aux liserés néon, son nom
+sur l'enseigne, 6 vitrines, un panneau de statistiques, un emplacement « bientôt : nouvelle
+salle » et, devant, le jardin de la Museum Hunt.
+
+- **Exposer** (onglet Musée) : choisir une vitrine, puis un de ses exemplaires (les plus rares
+  d'abord). Le Mimic apparaît en 3D avec sa taille, ses couleurs et sa mutation exactes : une
+  Chromatic reste irisée, une Spectral translucide avec ses lueurs. Il respire, cligne des yeux,
+  bouge de temps en temps et se tourne vers les visiteurs qui s'approchent.
+- **Examiner** (invite près d'une vitrine) : nom, rareté, mutation et sa probabilité, taille,
+  numéro de l'exemplaire, collectionneur, aperçu 3D.
+- **Personnaliser** : murs, lumière, socles, thème (3 options gratuites chacun) ; socles
+  « Étoilé » offerts par l'objectif « Première vitrine ».
+- **Visiter** (onglet Visites) : liste des musées présents (espèces, Mimics exposés,
+  mutations exposées), bouton Visiter. Un visiteur regarde et examine, ne modifie jamais rien.
+
+Pourquoi cela donne envie de collectionner : une mutation rare devient quelque chose qu'on
+**montre** (vitrine colorée, fiche avec sa probabilité, statistiques publiques dans la liste).
+
+## 15. Museum Hunt (V0.3)
+
+Chez un autre joueur, le panneau du jardin lance une chasse de **75 s** : 8 objets ordinaires,
+dont 3 cachent des **copies** de Mimics exposés par le propriétaire (même apparence, mutation
+comprise). Indices discrets, scanner (E) et examen (F) habituels.
+
+| Score | Valeur |
+|---|---|
+| Copie trouvée | +100 |
+| Objet ordinaire examiné | −15 |
+| Tout trouvé | +2 par seconde restante |
+
+Résultat : score, record personnel, nombre de musées différents explorés ; objectif
+« Explorateur de musées » (3 musées) → titre garanti. Le propriétaire est prévenu quand
+quelqu'un relève son défi, puis de son résultat. Il ne perd jamais rien : les copies
+disparaissent une fois trouvées, ses vrais exemplaires restent dans leurs vitrines.
+
+Interaction sociale : la visite apporte un défi (pas seulement de l'observation), et un musée
+bien garni de Mimics rares rend la chasse plus belle pour ses visiteurs.
+
+## 16. Hors périmètre V0.3 (volontairement)
+
+Échanges, vol de Mimics, achats Robux, économie, rebirths, combats, décoration libre, monde
+ouvert, nouvelles espèces. Les styles payants « à résultat connu » sont seulement envisagés.

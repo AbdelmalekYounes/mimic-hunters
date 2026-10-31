@@ -20,7 +20,7 @@
 param(
 	[string[]]$Sessions = @("server", "client", "mobile", "multiplayer"),
 	[string]$ReportDir,
-	[int]$TimeoutSec = 420,
+	[int]$TimeoutSec = 900,
 	[switch]$Visible,
 	[string]$StudioExe,
 	[string]$MobileDevice = "iphone_13",

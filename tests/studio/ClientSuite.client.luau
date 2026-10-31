@@ -110,6 +110,7 @@ end
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local CaptureMinigame = require(Shared.Logic.CaptureMinigame)
 local GameConfig = require(Shared.Config.GameConfig)
+local HudLayout = require(Shared.Logic.HudLayout)
 local remotesFolder = ReplicatedStorage:WaitForChild("MimicRemotes")
 
 local running = false
@@ -221,6 +222,18 @@ local function runTests(payload: any)
 		if view.X < 320 or view.Y < 240 then
 			-- Vue jamais dimensionnée après 5 s : la géométrie n'est pas mesurable dans cette session.
 			skip(string.format("vue de rendu %dx%d après 5 s : géométrie non mesurable", view.X, view.Y))
+		end
+		if screen.Y < HudLayout.MinHeight then
+			-- Vue de jeu plus basse que le minimum pris en charge (vu dans la VM : 667×232 quand
+			-- Studio réduit la vue) : géométrie non représentative, signalée comme ignorée.
+			skip(
+				string.format(
+					"vue de jeu %dx%d sous le minimum pris en charge (%d px de haut)",
+					screen.X,
+					screen.Y,
+					HudLayout.MinHeight
+				)
+			)
 		end
 		-- La disposition suit la taille finale : sur téléphone (petit côté ≤ 500 px), la compacte.
 		env.layout = hud:GetAttribute("Layout")
@@ -584,6 +597,470 @@ local function runTests(payload: any)
 		expect(locked and not locked.ok and locked.reason == "Locked", "titre verrouillé accepté")
 		task.wait(VIEW_PAUSE)
 		CollectionPanel.setOpen(false)
+	end)
+
+	-- ─── Musées (V0.3) ─────────────────────────────────────────────────
+	local MuseumController = clientRoot and require(clientRoot.Controllers.MuseumController) :: any
+	local CollectionServiceC = game:GetService("CollectionService")
+	local viewCamera = workspace.CurrentCamera
+
+	local function rootPart(): BasePart?
+		local current = player.Character
+		return current and current:FindFirstChild("HumanoidRootPart") :: BasePart?
+	end
+	local function museumOf(userId: number): Model?
+		for _, model in CollectionServiceC:GetTagged("Museum") do
+			if model:GetAttribute("OwnerUserId") == userId then
+				return model :: Model
+			end
+		end
+		return nil
+	end
+	-- Requête de musée : attend la réponse de CETTE action (une réponse tardive d'une autre
+	-- action, par exemple un déplacement, ne doit pas être prise pour elle — vu dans la VM).
+	local function museumRequest(sendName: string, action: string, ...: any): any
+		local reply = nil
+		local conn = remote("MuseumResult").OnClientEvent:Connect(function(p)
+			if p.action == action and reply == nil then
+				reply = p
+			end
+		end)
+		remote(sendName):FireServer(...)
+		local deadline = os.clock() + 5
+		while reply == nil and os.clock() < deadline do
+			task.wait()
+		end
+		conn:Disconnect()
+		return reply
+	end
+	-- Déplacement rapide par le réseau ; attend la réponse et le déplacement du personnage.
+	local function travel(kind: string, target: number?): any
+		local before = rootPart() and (rootPart() :: BasePart).Position
+		local reply = museumRequest("RequestTravel", "travel", kind, target)
+		local deadline = os.clock() + 3
+		while os.clock() < deadline do
+			local now = rootPart() and (rootPart() :: BasePart).Position
+			if now and before and (now - before).Magnitude > 5 then
+				break
+			end
+			task.wait(0.1)
+		end
+		return reply
+	end
+	-- Caméra de présentation (captures d'écran de la VM) : vue de trois quarts sur un musée.
+	-- Repère de la parcelle (MuseumLayout) : le sol est centré 5 studs plus loin que la parcelle.
+	local function plotFrame(model: Model): CFrame
+		return (model.PrimaryPart :: BasePart).CFrame * CFrame.new(0, -0.1, -5)
+	end
+	local function frameMuseum(model: Model, localOffset: CFrame?, localTarget: Vector3?)
+		local base = plotFrame(model)
+		viewCamera.CameraType = Enum.CameraType.Scriptable
+		-- Par défaut : vue plongeante par-dessus le mur avant et l'enseigne, sur les 6 vitrines.
+		local eye = base * (localOffset or CFrame.new(0, 22, -6))
+		viewCamera.CFrame =
+			CFrame.lookAt(eye.Position, (base * CFrame.new(localTarget or Vector3.new(0, 1, 7))).Position)
+	end
+	-- Gros plan sur une vitrine : caméra dans la salle, en diagonale devant le Mimic exposé
+	-- (côté entrée et vers le centre), pour avoir du recul sans filmer à travers le mur avant.
+	local function frameExhibit(model: Model, slot: number)
+		local exhibit = (model :: any).Exhibits:FindFirstChild("Exhibit" .. slot) :: Model
+		local center = exhibit:GetBoundingBox().Position
+		local frame = plotFrame(model)
+		local side = if frame:PointToObjectSpace(center).X > 0 then -1 else 1
+		local eye = center + frame.LookVector * 6 + frame.RightVector * (side * 8) + Vector3.new(0, 1.5, 0)
+		viewCamera.CameraType = Enum.CameraType.Scriptable
+		viewCamera.CFrame = CFrame.lookAt(eye, center)
+	end
+	local function releaseCamera()
+		viewCamera.CameraType = Enum.CameraType.Custom
+	end
+
+	check("musee.ma_base", function()
+		local deadline = os.clock() + 5
+		while ClientState.museumPlot == nil and os.clock() < deadline do
+			task.wait(0.1)
+		end
+		expect(ClientState.museumPlot ~= nil, "aucune parcelle reçue")
+		local mine = museumOf(player.UserId)
+		expect(mine ~= nil, "musée du joueur introuvable")
+		local reply = travel("base")
+		expect(reply and reply.ok, "MA BASE refusé : " .. tostring(reply and reply.reason))
+		local root = rootPart()
+		local distance = root
+			and ((root.Position - (mine :: Model).PrimaryPart.Position) * Vector3.new(1, 0, 1)).Magnitude
+		expect(distance and distance < 20, "personnage loin de son musée : " .. tostring(distance))
+		-- Le panneau du musée suit la collection (bug vu sur les captures : il restait à 0).
+		local board = (mine :: Model):FindFirstChild("StatsBoard")
+		local label = board
+			and board:FindFirstChildWhichIsA("SurfaceGui")
+			and board:FindFirstChildWhichIsA("SurfaceGui"):FindFirstChildWhichIsA("TextLabel")
+		local expected = string.format("Espèces %d/6", ClientState.summary.discovered)
+		expect(
+			label and string.find(label.Text, expected, 1, true),
+			"panneau : " .. tostring(label and label.Text) .. " (attendu " .. expected .. ")"
+		)
+		-- Musée vide (capture d'écran).
+		frameMuseum(mine :: Model)
+		task.wait(VIEW_PAUSE)
+		-- Déjà chez soi : MA BASE ouvre directement le mode décoration.
+		MuseumController.base()
+		task.wait(0.4)
+		expect(
+			panel.Visible and panel:FindFirstChild("MuseumPage", true).Visible,
+			"MA BASE sur place n'ouvre pas le mode décoration"
+		)
+		CollectionPanel.setOpen(false)
+	end)
+
+	check("musee.exposer_et_examiner", function()
+		expect(env.specimenId, "pré-requis : exemplaire capturé")
+		local reply = museumRequest("SetExhibit", "exhibit", 1, env.specimenId)
+		expect(reply and reply.ok, "exposition refusée : " .. tostring(reply and reply.reason))
+		local mine = museumOf(player.UserId) :: Model
+		local model = nil
+		local deadline = os.clock() + 4
+		while os.clock() < deadline and model == nil do
+			local candidate = mine:FindFirstChild("Exhibits") and mine.Exhibits:FindFirstChild("Exhibit1")
+			if candidate and candidate:GetAttribute("SpecimenId") == env.specimenId then
+				model = candidate
+			end
+			task.wait(0.1)
+		end
+		expect(model ~= nil, "Mimic exposé absent du musée")
+		expect(
+			#ClientState.specimens >= 1 and ClientState.summary.museum.slots[1] == env.specimenId,
+			"résumé non mis à jour"
+		)
+		local dup = museumRequest("SetExhibit", "exhibit", 2, env.specimenId)
+		expect(dup and not dup.ok and dup.reason == "AlreadyExhibited", "même exemplaire exposé deux fois")
+		MuseumController.inspect(model)
+		local sheet = MuseumController.sheet()
+		task.wait(0.3)
+		expect(sheet.panel.Visible, "fiche d'inspection non affichée")
+		expect(string.find(sheet.number.Text, env.specimenId, 1, true), "fiche : " .. sheet.number.Text)
+		expect(string.find(sheet.owner.Text, player.DisplayName, 1, true), "fiche : collectionneur absent")
+		local screen = hud.AbsoluteSize
+		local p, s = sheet.panel.AbsolutePosition, sheet.panel.AbsoluteSize
+		expect(p.X >= 0 and p.Y >= 0 and p.X + s.X <= screen.X + 1 and p.Y + s.Y <= screen.Y + 1, "fiche hors écran")
+		frameMuseum(mine, CFrame.new(-2, 7, -6), Vector3.new(-8, 2, 3))
+		task.wait(VIEW_PAUSE)
+		MuseumController.closeSheet()
+	end)
+
+	check("musee.onglet_vitrines_et_selecteur", function()
+		local MuseumTab = require(clientRoot.UI.MuseumTab) :: any
+		releaseCamera()
+		CollectionPanel.setOpen(true)
+		CollectionPanel.showTab("Museum")
+		task.wait(0.4)
+		local tabUi = MuseumTab.ui()
+		expect(tabUi.page.Visible, "onglet Musée non affiché")
+		for slot = 1, 6 do
+			local card = tabUi.slots[slot].card :: Frame
+			expect(
+				card.AbsoluteSize.X > 60 and inside(card, panel),
+				"vitrine " .. slot .. " invisible ou hors du panneau"
+			)
+		end
+		expect(string.find(tabUi.slots[1].title.Text, "Chairy", 1, true), "vitrine 1 : " .. tabUi.slots[1].title.Text)
+		expect(string.find(tabUi.slots[2].title.Text, "libre", 1, true), "vitrine 2 : " .. tabUi.slots[2].title.Text)
+		task.wait(VIEW_PAUSE)
+		MuseumTab.openPicker(2)
+		task.wait(0.4)
+		expect(tabUi.picker.Visible, "sélecteur non affiché")
+		local card = tabUi.pickerGrid:FindFirstChild(env.specimenId)
+		expect(card ~= nil, "exemplaire absent du sélecteur")
+		local marked = false
+		for _, d in (card :: Instance):GetDescendants() do
+			if d:IsA("TextLabel") and string.find(d.Text, "Exposé (vitrine 1)", 1, true) then
+				marked = true
+			end
+		end
+		expect(marked, "exemplaire déjà exposé non signalé dans le sélecteur")
+		task.wait(VIEW_PAUSE)
+		MuseumTab.closePicker()
+		CollectionPanel.setOpen(false)
+	end)
+
+	check("musee.personnalisation", function()
+		local MuseumStyles = require(Shared.Config.MuseumStyles)
+		local mine = museumOf(player.UserId) :: Model
+		local reply = museumRequest("SetMuseumStyle", "style", "wall", "mint")
+		expect(reply and reply.ok, "style refusé : " .. tostring(reply and reply.reason))
+		task.wait(0.4)
+		reply = museumRequest("SetMuseumStyle", "style", "lighting", "aurora")
+		expect(reply and reply.ok, "lumière refusée : " .. tostring(reply and reply.reason))
+		task.wait(0.4)
+		local locked = museumRequest("SetMuseumStyle", "style", "wall", "doré")
+		expect(locked and not locked.ok and locked.reason == "Locked", "option inconnue acceptée")
+		local deadline = os.clock() + 3
+		while
+			os.clock() < deadline and not string.find(tostring(mine:GetAttribute("Styles")), "mint/aurora", 1, true)
+		do
+			task.wait(0.1)
+		end
+		expect(
+			string.find(tostring(mine:GetAttribute("Styles")), "mint/aurora", 1, true),
+			"styles du musée : " .. tostring(mine:GetAttribute("Styles"))
+		)
+		local wall = mine:FindFirstChild("WallBack") :: BasePart
+		local expected = MuseumStyles.get("wall", "mint").color
+		local c = wall.Color
+		expect(
+			math.abs(c.R * 255 - expected[1]) < 1.5 and math.abs(c.G * 255 - expected[2]) < 1.5,
+			"couleur des murs non appliquée"
+		)
+		-- « Première vitrine » atteinte plus haut : le socle Étoilé est débloqué.
+		local star = museumRequest("SetMuseumStyle", "style", "pedestal", "pedestal_star")
+		expect(star and star.ok, "socle Étoilé refusé : " .. tostring(star and star.reason))
+		task.wait(0.4)
+		frameMuseum(mine)
+		task.wait(VIEW_PAUSE)
+	end)
+
+	check("musee.visite_six_mimics", function()
+		local ready = nil
+		local conn = bus.OnClientEvent:Connect(function(kind, data)
+			if kind == "museum_ready" then
+				ready = data
+			end
+		end)
+		bus:FireServer("prepare_museum")
+		local deadline = os.clock() + 5
+		while ready == nil and os.clock() < deadline do
+			task.wait(0.1)
+		end
+		conn:Disconnect()
+		expect(ready and ready.plot, "collectionneur fictif non préparé")
+		env.collector = ready.ownerUserId
+		local reply = travel("museum", ready.ownerUserId)
+		expect(
+			reply and reply.ok and reply.plot == ready.plot,
+			"visite refusée : " .. tostring(reply and reply.reason)
+		)
+		local museumModel = museumOf(ready.ownerUserId) :: Model
+		local count = 0
+		for _, child in museumModel.Exhibits:GetChildren() do
+			if child:IsA("Model") and child:GetAttribute("Exhibit") then
+				count += 1
+			end
+		end
+		expect(count == 6, "Mimics visibles chez le collectionneur : " .. count)
+		-- Vue d'ensemble, puis gros plans Chromatic (vitrine 2) et Spectral (vitrine 3).
+		frameMuseum(museumModel)
+		task.wait(VIEW_PAUSE)
+		frameExhibit(museumModel, 2)
+		task.wait(VIEW_PAUSE)
+		frameExhibit(museumModel, 3)
+		task.wait(VIEW_PAUSE)
+	end)
+
+	check("musee.panneau_visites_et_protections", function()
+		expect(env.collector, "pré-requis : collectionneur préparé")
+		local VisitsTab = require(clientRoot.UI.VisitsTab) :: any
+		releaseCamera()
+		CollectionPanel.setOpen(true)
+		CollectionPanel.showTab("Visits")
+		local entry = nil
+		local deadline = os.clock() + 4
+		while entry == nil and os.clock() < deadline do
+			for _, e in VisitsTab.entries() do
+				if e.userId == env.collector then
+					entry = e
+				end
+			end
+			task.wait(0.1)
+		end
+		expect(entry ~= nil, "musée du collectionneur absent de la liste")
+		expect(
+			entry.discovered == 6 and entry.exhibited == 6 and entry.mutationsExhibited == 3,
+			string.format("statistiques : %d / %d / %d", entry.discovered, entry.exhibited, entry.mutationsExhibited)
+		)
+		local row = VisitsTab.ui().list:FindFirstChild("Museum_" .. tostring(env.collector)) :: GuiObject
+		expect(row and inside(row, panel), "ligne du musée invisible ou hors du panneau")
+		task.wait(VIEW_PAUSE)
+		VisitsTab.visit(env.collector)
+		task.wait(0.5)
+		expect(not panel.Visible, "le panneau devrait se fermer pour la visite")
+		-- Protections : rien ne change chez le collectionneur, quoi que tente le visiteur.
+		local collectorMuseum = museumOf(env.collector) :: Model
+		local before = collectorMuseum.Exhibits:FindFirstChild("Exhibit1"):GetAttribute("SpecimenId")
+		local steal = museumRequest("SetExhibit", "exhibit", 3, before)
+		expect(steal and not steal.ok and steal.reason == "NotOwned", "exemplaire d'un autre accepté")
+		museumRequest("MoveExhibit", "move", 1, 2)
+		museumRequest("SetMuseumStyle", "style", "theme", "lab")
+		task.wait(0.4)
+		expect(
+			collectorMuseum.Exhibits:FindFirstChild("Exhibit1"):GetAttribute("SpecimenId") == before,
+			"vitrine du collectionneur modifiée par un visiteur"
+		)
+		expect(
+			not string.find(tostring(collectorMuseum:GetAttribute("Styles")), "/lab", 1, true),
+			"styles du collectionneur modifiés par un visiteur"
+		)
+	end)
+
+	check("chasse.partie_complete_reseau", function()
+		expect(env.collector, "pré-requis : collectionneur préparé")
+		local HuntController = require(clientRoot.Controllers.HuntController) :: any
+		local PropTracker = require(clientRoot.Controllers.PropTracker) :: any
+		local collectorMuseum = museumOf(env.collector) :: Model
+		local updates = {}
+		local conn = remote("HuntUpdate").OnClientEvent:Connect(function(p)
+			table.insert(updates, p)
+		end)
+		local function waitPhase(phase: string, timeout: number): any
+			local deadline = os.clock() + timeout
+			while os.clock() < deadline do
+				for _, u in updates do
+					if u.phase == phase then
+						return u
+					end
+				end
+				task.wait(0.1)
+			end
+			return nil
+		end
+		-- Devant le panneau du défi (le visiteur est à l'entrée du musée visité).
+		HuntController.start(env.collector)
+		local started = waitPhase("start", 5)
+		local refused = waitPhase("refused", 0.1)
+		expect(started ~= nil, "défi non lancé : " .. tostring(refused and refused.reason))
+		expect(HuntController.ui().status.frame.Visible, "barre de la Museum Hunt non affichée")
+		-- Attend que les objets du jardin soient répliqués.
+		local props = {}
+		local deadline = os.clock() + 4
+		while #props < 8 and os.clock() < deadline do
+			props = {}
+			for id, model in PropTracker.all() do
+				if model:GetAttribute("HuntId") == started.huntId and model.Parent then
+					table.insert(props, { id = id, model = model })
+				end
+			end
+			task.wait(0.1)
+		end
+		expect(#props == 8, "objets du jardin visibles : " .. #props)
+		local huntScan = request("RequestScan", "ScanResult", 5)
+		expect(huntScan and huntScan.ok and huntScan.hunt, "scan du défi : " .. tostring(huntScan and huntScan.reason))
+		frameMuseum(collectorMuseum, CFrame.new(0, 13, -25), Vector3.new(0, 0, -6))
+		task.wait(VIEW_PAUSE)
+		-- Examine les objets un par un (le client ignore lesquels sont des copies).
+		local root = rootPart() :: BasePart
+		local found = 0
+		for _, prop in props do
+			if waitPhase("end", 0) then
+				break
+			end
+			if prop.model.Parent == nil then
+				continue
+			end
+			local pivot = prop.model:GetPivot()
+			root.CFrame = CFrame.new(pivot.Position + Vector3.new(0, 3, 0) + pivot.LookVector * 3)
+			-- Le serveur doit avoir reçu la nouvelle position du personnage (réplication).
+			task.wait(0.6)
+			local reply = request("RequestInspect", "InspectResult", 5, prop.id)
+			if reply and not reply.ok and reply.reason == "OutOfRange" then
+				task.wait(0.8)
+				reply = request("RequestInspect", "InspectResult", 5, prop.id)
+			end
+			expect(reply and reply.ok, "examen refusé : " .. tostring(reply and reply.reason))
+			if reply.result == "HuntFound" then
+				found += 1
+				task.wait(0.5)
+			else
+				task.wait(1.05)
+			end
+		end
+		local finished = waitPhase("end", 5)
+		conn:Disconnect()
+		expect(finished ~= nil, "pas de résultat de fin")
+		expect(
+			finished.reason == "Complete" and finished.found == started.total,
+			string.format("fin : %s, %d/%d", tostring(finished.reason), finished.found or -1, started.total)
+		)
+		expect(found == started.total, "copies trouvées côté client : " .. found)
+		expect(finished.score > 0 and finished.newRecord == true, "score / record : " .. tostring(finished.score))
+		expect(finished.museums == 1, "musées différents : " .. tostring(finished.museums))
+		task.wait(0.4)
+		expect(HuntController.ui().result.frame.Visible, "carte de résultat non affichée")
+		expect(not HuntController.ui().status.frame.Visible, "barre du défi restée affichée")
+		env.huntScore = finished.score
+		task.wait(VIEW_PAUSE)
+		-- Rejouer tout de suite : refusé (anti-répétition).
+		updates = {}
+		conn = remote("HuntUpdate").OnClientEvent:Connect(function(p)
+			table.insert(updates, p)
+		end)
+		root.CFrame = (collectorMuseum.PrimaryPart :: BasePart).CFrame * CFrame.new(0, 3, -19)
+		task.wait(0.2)
+		HuntController.start(env.collector)
+		local again = waitPhase("refused", 3)
+		conn:Disconnect()
+		expect(again and again.reason == "Cooldown", "rejouer immédiatement : " .. tostring(again and again.reason))
+	end)
+
+	check("perf.budget_musees", function()
+		-- Mesures indicatives (Studio, bureau caché ou VM : pas un appareil réel).
+		local museumsFolder = workspace.Map:FindFirstChild("Museums") :: Folder
+		local parts, lights, perPlotMax = 0, 0, 0
+		for _, d in museumsFolder:GetDescendants() do
+			if d:IsA("BasePart") then
+				parts += 1
+			elseif d:IsA("PointLight") then
+				lights += 1
+			end
+		end
+		for _, model in CollectionServiceC:GetTagged("Museum") do
+			local n = 0
+			for _, d in model:GetDescendants() do
+				if d:IsA("BasePart") then
+					n += 1
+				end
+			end
+			perPlotMax = math.max(perPlotMax, n)
+		end
+		local function frameTime(seconds: number): number
+			local total, frames = 0, 0
+			local conn = game:GetService("RunService").RenderStepped:Connect(function(dt)
+				total += dt
+				frames += 1
+			end)
+			task.wait(seconds)
+			conn:Disconnect()
+			return if frames > 0 then total / frames * 1000 else -1
+		end
+		local collectorMuseum = museumOf(env.collector) :: Model
+		frameMuseum(collectorMuseum)
+		task.wait(0.5)
+		local museumMs = frameTime(3)
+		local stats = MuseumController.stats()
+		releaseCamera()
+		travel("village")
+		task.wait(1)
+		local villageMs = frameTime(3)
+		env.perf = {
+			museumParts = parts,
+			museumLights = lights,
+			partsPerMuseumMax = perPlotMax,
+			exhibitsKnown = stats.registered,
+			exhibitsAnimated = stats.animated,
+			maxAnimated = stats.maxAnimated,
+			frameMsMuseum = math.floor(museumMs * 10) / 10,
+			frameMsVillage = math.floor(villageMs * 10) / 10,
+		}
+		-- Budget (ARCHITECTURE.md) : ≤ 450 Parts par musée Mimics compris, ≤ 30 lumières
+		-- pour tout le quartier, animations plafonnées.
+		expect(perPlotMax <= 450, "Parts par musée : " .. perPlotMax)
+		expect(lights <= 30, "lumières du quartier : " .. lights)
+		expect(stats.animated <= stats.maxAnimated, "Mimics animés au-delà du budget : " .. stats.animated)
+	end)
+
+	check("musee.retour_village", function()
+		releaseCamera()
+		local reply = travel("village")
+		expect(reply and reply.ok, "retour au village refusé")
+		local root = rootPart()
+		expect(root and (root.Position * Vector3.new(1, 0, 1)).Magnitude < 25, "personnage loin du village")
 	end)
 
 	bus:FireServer("report", { results = results, env = env, capturedSpecies = capturedSpecies })

@@ -73,6 +73,7 @@ function Fixtures.world(seed: number?, overrides: any?, worldOptions: any?): (an
 		mutations = Loader.shared("Config/Mutations"),
 		objectives = Loader.shared("Config/Objectives").list(),
 		cosmeticDefaults = Loader.shared("Config/Objectives").defaults(),
+		museumStyles = Loader.shared("Config/MuseumStyles"),
 	}
 	for k, v in worldOptions or {} do
 		options[k] = v

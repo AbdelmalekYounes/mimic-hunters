@@ -121,6 +121,12 @@ local function build(): Frame
 			if summary == nil or summary.objectives[objective.id] == nil then
 				return
 			end
+			if reward.kind == "pedestal" then
+				-- Style de musée : appliqué par le serveur au musée du joueur.
+				Audio.play("UiClick", 1.2)
+				Remotes.get("SetMuseumStyle"):FireServer("pedestal", reward.id)
+				return
+			end
 			local equipped = summary.cosmetics[reward.kind] == reward.id
 			if reward.kind == "title" and equipped then
 				equip("title", nil) -- retirer le titre
@@ -214,7 +220,12 @@ local function refresh()
 		row.status.TextColor3 = if done then C.Mint else C.Muted
 		row.row.BackgroundColor3 = if done then Color3.fromRGB(38, 56, 60) else Color3.fromRGB(40, 32, 62)
 		local reward = objective.reward
-		local equipped = done and summary.cosmetics[reward.kind] == reward.id
+		local equipped = done
+			and (
+				if reward.kind == "pedestal"
+					then summary.museum ~= nil and summary.museum.pedestal == reward.id
+					else summary.cosmetics[reward.kind] == reward.id
+			)
 		row.button.Visible = done
 		row.button.Text = if equipped then (if reward.kind == "title" then "Retirer" else "Équipée") else "Équiper"
 		row.button.AutoButtonColor = not (equipped and reward.kind ~= "title")

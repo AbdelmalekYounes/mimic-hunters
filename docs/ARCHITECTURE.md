@@ -1,4 +1,4 @@
-# MIMIC HUNTERS — Architecture et choix techniques (V0.2)
+# MIMIC HUNTERS — Architecture et choix techniques (V0.3)
 
 ## 1. Principe directeur
 
@@ -129,3 +129,51 @@ partir de sa graine sur chaque client : rien d'autre que la graine et la mutatio
 - **Pipeline Blender / rigs** : inutile pour la V0.1 ; Parts + animations procédurales suffisent.
 - **Carte enregistrée dans le .rbxl** : la génération par script garde la carte versionnée
   dans Git, diffable et reproductible.
+
+## 9. Musées et Museum Hunt (V0.3)
+
+Même découpage que la chasse : un cœur pur testé dans Lune, un adaptateur Roblox mince.
+
+| Module | Rôle | Testé |
+|---|---|---|
+| `Map/MuseumLayout` | plan du quartier : 8 parcelles, avenue, socles, cachettes, panneau (données pures) | Lune |
+| `Core/PlotRegistry` | une parcelle par joueur, jamais partagée, file d'attente, libération | Lune |
+| `Core/MuseumCore` | parcelles, déplacements, vitrines, styles, visites, Museum Hunt ; retourne des événements | Lune + Studio |
+| `Core/Collection` (ajouts) | `exhibit`, `clearSlot`, `moveExhibit`, `setMuseumStyle`, `museumView`, `recordHunt` | Lune |
+| `Map/MuseumBuilder` | géométrie (Parts), rendu des Mimics exposés (`MimicModelBuilder` + `SpecimenLook`), styles | Studio |
+| `Services/MuseumServer` | RemoteEvents, événements internes (rendu, téléportation, objets de chasse) | Studio |
+| `Controllers/MuseumController` | déplacements, Mimics « vivants », fiche d'inspection | Studio |
+| `Controllers/HuntController`, `UI/MuseumTab`, `UI/VisitsTab` | défi, mode décoration, visites | Studio |
+
+**Événements internes** (jamais envoyés au client) : `_MuseumRender`, `_MuseumClear`,
+`_Teleport`, `_HuntSpawn`, `_HuntRemoveProp`, `_HuntDespawn` (plus `_ProfileChanged`).
+`HuntServer` les transmet à `MuseumServer`. Pendant une Museum Hunt, il route aussi
+`RequestScan` et `RequestInspect` (identifiants `MH…`) vers le défi : le joueur garde
+les mêmes commandes.
+
+**Sécurité.** Aucune requête de modification ne prend de propriétaire cible : vitrines et
+styles portent toujours sur la collection du demandeur. Un visiteur ne peut donc rien modifier
+chez un autre, par construction. La Museum Hunt ne lit que des vues : les copies sont des
+données (espèce, graine, mutation) et l'adaptateur ne reçoit jamais l'information « copie ou
+leurre » (seuls `kind` et `spot` partent vers `_HuntSpawn`).
+
+**Anti-abus de la Museum Hunt** : portée de lancement (12 studs du panneau) et d'examen
+(11 studs de la cachette) ; un défi par musée et par visiteur ; 20 s entre deux défis ;
+cachettes inventées ou déjà trouvées refusées ; anti-spam ; annulation si le propriétaire part
+(musée détruit), si le visiteur part ou quitte le jardin. Récompenses bornées : record personnel,
+compteur de musées **différents** (une fois par musée), objectif à 3 musées. Deux comptes qui
+s'aident ne gagnent chacun qu'un musée de plus.
+
+**Budget de performance** (mesuré dans Studio, PC et mobile simulé) :
+
+| Élément | Budget | Mesuré |
+|---|---|---|
+| Parts par musée, Mimics compris | ≤ 450 | 168 (6 Mimics) |
+| Lumières du quartier | ≤ 30 | 24 (2 par musée + 6 lanternes + éclats Chromatic) |
+| Mimics animés côté client | 12 (PC), 6 (tactile), à moins de 70 studs | plafond respecté |
+| Effets de mutation | à moins de 45 studs (35 en tactile), lumière coupée au-delà | — |
+| Particules | aucune dans les musées (révélations de la chasse seulement) | — |
+| Aperçus 3D actifs | fiche, sélecteur et cartes de la page seulement ; vidés à la fermeture | — |
+
+Les animations des Mimics exposés ne changent que l'affichage local (`PivotTo` sur les modèles
+répliqués) : rien n'est envoyé au serveur, et la vitrine solide les contient.
