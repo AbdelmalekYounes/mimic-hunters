@@ -217,14 +217,76 @@ local function addSpeciesDetails(model: Model, species: any, accent: Color3)
 	end
 end
 
--- Construit la forme révélée d'une espèce, à l'origine.
-function MimicModelBuilder.build(speciesId: string, variant: number?): Model
+-- Effets propres aux mutations, appliqués après la construction (voir SpecimenLook).
+-- Le client anime ensuite ces éléments (MutationFx) : teinte changeante, lueurs en orbite.
+local function applyMutationLook(model: Model, species: any, look: any)
+	local anchor = PropBuilder.FaceAnchors[species.kind]
+	local height = if anchor then anchor.height else 4
+	if look.mutation == "Spectral" then
+		-- Trois petites lueurs autour du Mimic (positions de départ ; l'orbite est animée).
+		for i = 1, 3 do
+			local angle = (i - 1) * math.pi * 2 / 3
+			local wisp = feature(model, {
+				Name = "Wisp",
+				Shape = Enum.PartType.Ball,
+				Size = V(0.38, 0.38, 0.38),
+				CFrame = C(math.cos(angle) * 2.2, height * (0.45 + 0.15 * i), math.sin(angle) * 2.2),
+				Color = Geometry.rgb(look.eyeGlow or look.accent),
+				Material = Enum.Material.Neon,
+				Transparency = 0.15,
+			})
+			wisp:SetAttribute("Wisp", i)
+		end
+	elseif look.mutation == "Chromatic" then
+		for _, child in model:GetDescendants() do
+			if child:IsA("BasePart") and child.Name == "Glint" then
+				child.Color = Geometry.rgb(look.glow or look.accent)
+			end
+		end
+	end
+	if look.transparency and look.transparency > 0 then
+		for _, child in model:GetDescendants() do
+			if child:IsA("BasePart") and child:GetAttribute("Tint") then
+				child.Transparency = look.transparency
+				child.Material = Enum.Material.SmoothPlastic
+			end
+		end
+	end
+	if look.eyeGlow then
+		local color = Geometry.rgb(look.eyeGlow)
+		for _, child in model:GetDescendants() do
+			if child:IsA("BasePart") and (child.Name == "Pupil" or child.Name == "ScreenEye") then
+				child.Color = color
+				child.Material = Enum.Material.Neon
+			end
+		end
+	end
+	if look.glow then
+		local root = model.PrimaryPart
+		if root then
+			local light = Instance.new("PointLight")
+			light.Name = "MutationGlow"
+			light.Color = Geometry.rgb(look.glow)
+			light.Brightness = 1.4
+			light.Range = 9
+			light.Parent = root
+		end
+	end
+	model:SetAttribute("Mutation", look.mutation)
+end
+
+--[[
+	Construit la forme révélée d'une espèce, à l'origine.
+	`look` (SpecimenLook) : apparence d'un exemplaire précis (couleurs, taille, mutation) ;
+	sans `look`, l'apparence de référence de l'espèce.
+]]
+function MimicModelBuilder.build(speciesId: string, variant: number?, look: any?): Model
 	local species = MimicCatalog.get(speciesId)
 	assert(species, "MimicModelBuilder : espèce inconnue " .. tostring(speciesId))
 	local model = PropBuilder.build(species.kind, variant)
 	model.Name = species.name
-	local body = Geometry.rgb(species.appearance.bodyColor)
-	local accent = Geometry.rgb(species.appearance.accentColor)
+	local body = Geometry.rgb(if look then look.body else species.appearance.bodyColor)
+	local accent = Geometry.rgb(if look then look.accent else species.appearance.accentColor)
 	for _, child in model:GetDescendants() do
 		if child:IsA("BasePart") then
 			child.CanCollide = false
@@ -237,6 +299,15 @@ function MimicModelBuilder.build(speciesId: string, variant: number?): Model
 	addMouth(model, species.kind, species.appearance.mouth, accent)
 	addSpeciesDetails(model, species, accent)
 	model:SetAttribute("SpeciesId", species.id)
+	if look then
+		applyMutationLook(model, species, look)
+		-- Taille de l'exemplaire, autour du pivot (posé au sol : il reste au sol).
+		if look.scale and math.abs(look.scale - 1) > 1e-3 then
+			pcall(function()
+				model:ScaleTo(look.scale)
+			end)
+		end
+	end
 	return model
 end
 

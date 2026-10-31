@@ -259,6 +259,58 @@ local function serverSuite()
 		end
 	end)
 
+	check("especes.variantes_reproductibles", function()
+		local SpecimenLook = require(Shared.Logic.SpecimenLook)
+		local species = MimicCatalog.get("trashling")
+		local lookA = SpecimenLook.compute(species, 777, "Standard")
+		local modelA1 = MimicModelBuilder.build(species.id, nil, lookA)
+		local modelA2 = MimicModelBuilder.build(species.id, nil, SpecimenLook.compute(species, 777, "Standard"))
+		local reference = MimicModelBuilder.build(species.id)
+		local function tintColor(model: Model): Color3?
+			for _, d in model:GetDescendants() do
+				if d:IsA("BasePart") and d:GetAttribute("Tint") then
+					return d.Color
+				end
+			end
+			return nil
+		end
+		expect(tintColor(modelA1) == tintColor(modelA2), "même graine, couleurs différentes")
+		expect(tintColor(modelA1) ~= tintColor(reference), "variation de couleur non appliquée")
+		local _, sizeA = modelA1:GetBoundingBox()
+		local _, sizeRef = reference:GetBoundingBox()
+		local ratio = sizeA.Y / sizeRef.Y
+		expect(math.abs(ratio - lookA.scale) < 0.02, string.format("taille %.3f, attendu %.3f", ratio, lookA.scale))
+		expect(math.abs(modelA1:GetPivot().Position.Y) < 0.05, "exemplaire mis à l'échelle hors du sol")
+		for _, m in { modelA1, modelA2, reference } do
+			m:Destroy()
+		end
+	end)
+
+	check("mutations.modeles", function()
+		local SpecimenLook = require(Shared.Logic.SpecimenLook)
+		for _, species in MimicCatalog.list() do
+			local chroma = MimicModelBuilder.build(species.id, nil, SpecimenLook.compute(species, 11, "Chromatic"))
+			local spectral = MimicModelBuilder.build(species.id, nil, SpecimenLook.compute(species, 11, "Spectral"))
+			expect(chroma:GetAttribute("Mutation") == "Chromatic", species.id .. " : attribut Chromatic")
+			local glow = chroma.PrimaryPart and chroma.PrimaryPart:FindFirstChild("MutationGlow")
+			expect(glow ~= nil, species.id .. " : éclat Chromatic absent")
+			local wisps, translucent = 0, 0
+			for _, d in spectral:GetDescendants() do
+				if d:IsA("BasePart") then
+					if d:GetAttribute("Wisp") then
+						wisps += 1
+					elseif d:GetAttribute("Tint") and d.Transparency > 0.3 then
+						translucent += 1
+					end
+				end
+			end
+			expect(wisps == 3, species.id .. " : lueurs Spectral " .. wisps)
+			expect(translucent > 0, species.id .. " : Spectral non translucide")
+			chroma:Destroy()
+			spectral:Destroy()
+		end
+	end)
+
 	check("reseau.remote_events", function()
 		local folder = ReplicatedStorage:FindFirstChild("MimicRemotes")
 		expect(folder ~= nil, "dossier MimicRemotes absent")
@@ -396,6 +448,63 @@ local function serverSuite()
 		)
 	end)
 
+	check("mutations.capture_reelle", function()
+		-- Hook Studio : impose la mutation, puis vérifie qu'elle vient bien du tirage serveur.
+		workspace:SetAttribute("MH_ForceMutation", "Chromatic")
+		local record = findHidden()
+		expect(record, "aucun Mimic caché")
+		local pos = slotPosition(record.slotId)
+		task.wait(0.6)
+		local _, inspected = world:inspect(A, pos, record.slotId, os.clock())
+		expect(inspected.result == "Mimic", "révélation : " .. tostring(inspected.result or inspected.reason))
+		local t0 = os.clock()
+		local _, started = world:startCapture(A, pos, record.id, t0)
+		expect(started.ok, "démarrage : " .. tostring(started.reason))
+		started._t0 = t0
+		local events, last = playCapture(A, pos, started, { "hit", "hit" })
+		workspace:SetAttribute("MH_ForceMutation", nil)
+		expect(last.status == "Succeeded", "capture : " .. tostring(last.status))
+		local resolved = named(events, "CaptureResolved")[1]
+		expect(resolved and resolved.payload.mutation == "Chromatic", "mutation attendue : Chromatic")
+		expect(#named(events, "RareCapture") == 1, "annonce de capture rare absente")
+		local specimen = world:inventoryOf(A):specimen(resolved.payload.specimen.id)
+		expect(specimen and specimen.mutation == "Chromatic", "exemplaire Chromatic absent de la collection")
+	end)
+
+	check("sauvegarde.cycle_studio", function()
+		-- Vrai ProfileService du serveur (stockage choisi par DataStoreBackend.choose).
+		-- selene: allow(global_usage)
+		local profiles = (_G :: any).MimicProfiles
+		expect(profiles ~= nil, "_G.MimicProfiles absent")
+		log("stockage des profils :", profiles.name)
+		local service = profiles.service
+		local C = -3003
+		local status, data = service:load(C)
+		expect(status == "Ready", "chargement : " .. tostring(status))
+		world:addPlayer(C, os.clock(), data)
+		local species = MimicCatalog.get("lumino")
+		-- Même chemin d'écriture qu'une capture (la capture complète est testée plus haut).
+		local ok, info = world:inventoryOf(C):grant("studio:cycle-1", "lumino", species.rarity, "Spectral", 4242)
+		expect(ok, "ajout refusé : " .. tostring(info))
+		local id = info.specimen.id
+		expect(service:save(C, world:getProfile(C)), "sauvegarde périodique échouée")
+		local profile = world:getProfile(C)
+		world:removePlayer(C, os.clock())
+		expect(service:release(C, profile), "sauvegarde finale échouée")
+		-- Reconnexion : le même exemplaire revient, avec sa mutation et sa graine.
+		local again, reloaded = service:load(C)
+		expect(again == "Ready", "rechargement : " .. tostring(again))
+		world:addPlayer(C, os.clock(), reloaded)
+		local specimen = world:inventoryOf(C):specimen(id)
+		expect(specimen ~= nil, "exemplaire perdu après reconnexion")
+		expect(specimen.mutation == "Spectral" and specimen.seed == 4242, "mutation ou graine modifiée")
+		local duplicate = world:inventoryOf(C):grant("studio:cycle-1", "lumino", species.rarity, "Spectral", 1)
+		expect(not duplicate, "même événement de capture accordé deux fois")
+		local final = world:getProfile(C)
+		world:removePlayer(C, os.clock())
+		service:release(C, final)
+	end)
+
 	world:removePlayer(A, os.clock())
 	world:removePlayer(B, os.clock())
 	check("joueurs.retrait_faux_joueurs", function()
@@ -412,6 +521,45 @@ local reports: { [number]: any } = {}
 bus.OnServerEvent:Connect(function(player, kind, data)
 	if kind == "report" then
 		reports[player.UserId] = data
+	elseif kind == "prepare_mutation" then
+		-- Prépare une capture rare pour le vrai client : mutation imposée (hook Studio),
+		-- personnage placé à côté d'un Mimic caché, Mimic révélé pour ce joueur.
+		-- Le client capture ensuite par le réseau, comme en jeu.
+		local mutation = if type(data) == "table" and type(data.mutation) == "string"
+			then data.mutation
+			else "Chromatic"
+		workspace:SetAttribute("MH_ForceMutation", mutation)
+		local record = findHidden()
+		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+		if record == nil or root == nil then
+			bus:FireClient(player, "mutation_ready", { ok = false })
+			return
+		end
+		local position = slotPosition(record.slotId)
+		root.CFrame = CFrame.new(position + Vector3.new(0, 2, 0))
+		task.wait(0.3)
+		local _, inspected = world:inspect(player.UserId, position, record.slotId, os.clock())
+		-- Diffuse la révélation au client (les événements retournés ne passent pas par HuntServer ici).
+		local remotes = ReplicatedStorage:FindFirstChild("MimicRemotes")
+		local update = remotes and remotes:FindFirstChild("MimicUpdate") :: RemoteEvent?
+		if update and inspected.result == "Mimic" then
+			update:FireClient(player, {
+				mimicId = record.id,
+				propId = record.slotId,
+				speciesId = record.speciesId,
+				state = "Revealed",
+				ownerUserId = player.UserId,
+				remaining = GameConfig.Hunt.RevealClaimDuration,
+			})
+		end
+		bus:FireClient(player, "mutation_ready", {
+			ok = inspected.result == "Mimic",
+			mimicId = record.id,
+			reason = inspected.result or inspected.reason,
+		})
+		task.delay(20, function()
+			workspace:SetAttribute("MH_ForceMutation", nil)
+		end)
 	end
 end)
 
@@ -436,6 +584,16 @@ end
 -- ─── Suite « client » (session Play, 1 joueur) ─────────────────────────
 
 local function clientSuite()
+	-- Journal horodaté des requêtes du joueur (rapport) : sert à diagnostiquer les entrées parasites.
+	local remotesFolder = ReplicatedStorage:WaitForChild("MimicRemotes", 10)
+	for _, name in { "RequestScan", "RequestInspect", "RequestCapture", "SubmitPulse", "ClientReady" } do
+		local r = remotesFolder and remotesFolder:FindFirstChild(name) :: RemoteEvent?
+		if r then
+			r.OnServerEvent:Connect(function(_, ...)
+				log(string.format("%.3f %s %s", os.clock(), name, tostring((...))))
+			end)
+		end
+	end
 	local players = waitPlayers(1, 30)
 	local player = players[1]
 	check("joueur.connexion", function()

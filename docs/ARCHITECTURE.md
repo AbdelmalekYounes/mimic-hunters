@@ -1,4 +1,4 @@
-# MIMIC HUNTERS — Architecture et choix techniques (V0.1)
+# MIMIC HUNTERS — Architecture et choix techniques (V0.2)
 
 ## 1. Principe directeur
 
@@ -87,15 +87,27 @@ plafond de 12 impulsions), ni dépasser le délai de la tentative.
 | Fuite d'information | Le client ne reçoit jamais la liste des Mimics cachés ; les ids de Mimic ne sont pas dérivés des objets ; indices limités aux joueurs proches | `envoie l'état initial`, `indices uniquement aux joueurs proches` |
 | Gestionnaire qui plante | Chaque handler serveur est enveloppé dans `pcall` (`guarded`) | — (revue de code) |
 
-## 6. Données et persistance (préparation V0.2)
+## 6. Données et persistance (V0.2)
 
-- `SessionInventory:snapshot()` / `fromSnapshot()` définissent le format versionné
-  `{ version = 1, totalCaptures, species = { [id] = { count, discoveryOrder } } }`.
-- `HuntWorld:getProfile(userId)` → `{ version = 1, inventory, tutorialDone }`.
-- `MemoryProfileStore` implémente l'interface `load(userId)` / `save(userId, profile)`.
-  En V0.2, un `DataStoreProfileStore` respectant la même interface la remplacera
-  (avec `UpdateAsync`, réessais et verrou de session), sans toucher à `HuntWorld`.
-- Les ids d'espèce (`chairy`, `trashling`…) sont stables et servent de clés de sauvegarde.
+Détail complet : [DATA_SCHEMA.md](DATA_SCHEMA.md).
+
+| Module | Rôle | Testé |
+|---|---|---|
+| `Core/ProfileSchema` | profil v2, migration depuis la V0.1, réparation, versions futures refusées | Lune |
+| `Core/Collection` | exemplaires individuels, idempotence par clé de capture, codex, favoris, objectifs, cosmétiques, réglages | Lune + Studio |
+| `Core/ProfileService` | chargement verrouillé, sauvegardes (capture, 60 s, départ, fermeture), réessais, budget | Lune (pannes, verrous, serveurs concurrents) |
+| `Core/MemoryBackend` | stockage simulé (tests, repli Studio) | Lune + Studio |
+| `Services/DataStoreBackend` | `UpdateAsync` ; DataStore distinct en Studio ; repli mémoire si inaccessible | **non testé sur un vrai DataStore** (place non publiée) |
+| `Services/HuntServer` | relie les deux : profil chargé avant l'entrée dans le monde, `_ProfileChanged` → sauvegarde | Studio |
+
+`HuntWorld` reste pur : il reçoit des données brutes (migrées par `ProfileSchema`), refuse
+toute capture tant que le profil n'est pas sûr (`ready = false`), et signale les modifications
+par des événements internes (`_ProfileChanged`, `_CosmeticsChanged`) que `HuntServer`
+traite sans jamais les envoyer au client.
+
+Mutations : tirées dans `HuntWorld._resolveSuccess` avec le générateur du serveur
+(`Config/Mutations`). L'apparence d'un exemplaire (`Logic/SpecimenLook`) se recalcule à
+partir de sa graine sur chaque client : rien d'autre que la graine et la mutation n'est stocké.
 
 ## 7. Rendu et performances
 

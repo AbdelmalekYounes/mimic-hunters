@@ -11,6 +11,12 @@
 	Chaque méthode publique retourne (events, reply) :
 	- events : liste { name, userId?, payload } ; userId nil = diffusion à tous ;
 	- reply  : la réponse destinée au joueur (déjà incluse dans events).
+	Les événements dont le nom commence par « _ » sont internes au serveur (jamais envoyés) :
+	« _ProfileChanged » demande une sauvegarde du profil.
+
+	Collection persistante (V0.2) : chaque joueur a une Collection (profil v2). Tant que son
+	profil n'est pas chargé de manière sûre (`ready = false`), aucune capture ne peut démarrer :
+	une acquisition qui ne pourrait pas être sauvegardée serait perdue.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -23,30 +29,30 @@ local MimicStateMachine = require(Core.MimicStateMachine)
 local EncounterGenerator = require(Core.EncounterGenerator)
 local CaptureLedger = require(Core.CaptureLedger)
 local RewardValidator = require(Core.RewardValidator)
-local SessionInventory = require(Core.SessionInventory)
+local Collection = require(Core.Collection)
+local ProfileSchema = require(Core.ProfileSchema)
 local RateLimiter = require(Core.RateLimiter)
 local TutorialFlow = require(Core.TutorialFlow)
 
 export type Event = { name: string, userId: number?, payload: any }
 
-export type Profile = {
-	version: number,
-	inventory: any,
-	tutorialDone: boolean,
-}
+export type Profile = ProfileSchema.Profile
 
 type Slot = { id: string, kind: string, zone: string, position: any }
 
 type PlayerState = {
 	userId: number,
+	-- Collection persistante (nom historique conservé : `inventoryOf`).
 	inventory: any,
+	-- Profil chargé de manière sûre : les acquisitions sont autorisées et sauvegardées.
+	ready: boolean,
+	profileStatus: string,
 	tutorialStep: TutorialFlow.Step,
 	tutorialMimic: MimicStateMachine.Record?,
 	scanReadyAt: number,
 	inspectReadyAt: number,
 }
 
-local PROFILE_VERSION = 1
 local LEDGER_KEEP_SECONDS = 120
 
 local HuntWorld = {}
@@ -67,6 +73,10 @@ end
 		tutorialSlot = PropSpec?,   -- objet du tutoriel (jamais partagé)
 		zones = { string },
 		rng = Rng,
+		serverId = string?,         -- préfixe des clés de capture (unique par serveur : JobId)
+		wallClock = () -> number?,  -- horloge murale (os.time) pour les dates d'acquisition
+		objectives = { Objective }?, -- objectifs du collectionneur (Config/Objectives)
+		mutations = Mutations?,      -- tirage des mutations (Config/Mutations)
 	}
 ]]
 function HuntWorld.new(options: any)
@@ -76,6 +86,11 @@ function HuntWorld.new(options: any)
 	self._rarities = options.rarities
 	self._rng = options.rng
 	self._zones = options.zones
+	self._serverId = options.serverId or "local"
+	self._wallClock = options.wallClock or os.time
+	self._objectives = options.objectives or {}
+	self._mutations = options.mutations
+	self._cosmeticDefaults = options.cosmeticDefaults or {}
 	self._slotList = {} :: { Slot }
 	self._slots = {} :: { [string]: Slot }
 	for _, spec in options.slots do
@@ -221,6 +236,10 @@ function HuntWorld._tutorialEvent(self: any, player: PlayerState, event: string,
 	end
 	player.tutorialStep = after
 	if after == "Done" then
+		if player.ready then
+			player.inventory:setTutorialDone(true)
+			push(events, "_ProfileChanged", player.userId, { important = true })
+		end
 		local record = player.tutorialMimic
 		if record and record.state ~= "Disguised" and record.state ~= "Captured" then
 			push(events, "MimicUpdate", player.userId, {
@@ -338,20 +357,61 @@ function HuntWorld._resolveSuccess(self: any, attempt: CaptureMinigame.Attempt, 
 	local valid = RewardValidator.validate(attempt, record, self._ledger)
 	self._ledger:close(attempt.id, now)
 
-	if valid and player and self._ledger:markRewarded(attempt.id) then
-		local added, info = player.inventory:add(record.speciesId, attempt.id)
+	if valid and player and not player.ready then
+		-- Profil perdu pendant la tentative : rien ne peut être sauvegardé, rien n'est accordé.
+		push(events, "CaptureResolved", attempt.userId, {
+			success = false,
+			attemptId = attempt.id,
+			mimicId = record.id,
+			speciesId = record.speciesId,
+			reason = "ProfileUnavailable",
+		})
+	elseif valid and player and self._ledger:markRewarded(attempt.id) then
+		-- Tirages faits ici seulement, côté serveur, au moment de la capture réussie.
+		-- Le Mimic du tutoriel est toujours Standard (première capture garantie et lisible).
+		local mutation = if self._mutations and not record.personal then self._mutations.roll(self._rng) else "Standard"
+		local seed = self._rng:nextInteger(1, 2147483646)
+		local species = self:_species(record.speciesId)
+		-- Clé unique entre serveurs : un même événement de capture n'accorde qu'un exemplaire.
+		local key = self._serverId .. ":" .. attempt.id
+		local added, info = player.inventory:grant(key, record.speciesId, species.rarity, mutation, seed)
 		if added then
+			local specimen = player.inventory:specimenView(info.specimen)
 			push(events, "CaptureResolved", attempt.userId, {
 				success = true,
 				attemptId = attempt.id,
 				mimicId = record.id,
 				speciesId = record.speciesId,
-				isNew = info.isNew,
-				count = info.count,
+				specimen = specimen,
+				mutation = mutation,
+				isNew = info.isNewSpecies,
+				isNewMutation = info.isNewMutation,
+				completed = info.completed,
+				count = player.inventory:count(record.speciesId),
 				totalCaptures = info.totalCaptures,
 				discovered = info.discovered,
 			})
-			push(events, "InventoryUpdate", attempt.userId, { snapshot = player.inventory:snapshot() })
+			push(events, "CollectionDelta", attempt.userId, {
+				added = specimen,
+				summary = player.inventory:summary(),
+			})
+			push(events, "_ProfileChanged", attempt.userId, { important = true })
+			if mutation ~= "Standard" then
+				-- Capture rare : annoncée à tout le serveur (de quoi la montrer).
+				push(events, "RareCapture", nil, {
+					userId = attempt.userId,
+					speciesId = record.speciesId,
+					mutation = mutation,
+				})
+			end
+		else
+			push(events, "CaptureResolved", attempt.userId, {
+				success = false,
+				attemptId = attempt.id,
+				mimicId = record.id,
+				speciesId = record.speciesId,
+				reason = info,
+			})
 		end
 	end
 
@@ -380,14 +440,66 @@ function HuntWorld.populate(self: any, now: number): { Event }
 	return {}
 end
 
-function HuntWorld.addPlayer(self: any, userId: number, now: number, profile: Profile?)
+-- Contexte de migration des profils (rareté actuelle des espèces, horloge murale).
+function HuntWorld._schemaContext(self: any, userId: number): ProfileSchema.Context
+	return {
+		userId = userId,
+		now = self._wallClock(),
+		rarityOf = function(speciesId: string): string?
+			local species = self._catalog.get(speciesId)
+			return if species then species.rarity else nil
+		end,
+	}
+end
+
+function HuntWorld._newCollection(self: any, userId: number, profile: ProfileSchema.Profile): any
+	local collection = Collection.new(userId, profile, {
+		now = self._wallClock,
+		objectives = self._objectives,
+		defaults = self._cosmeticDefaults,
+	})
+	-- Rattrapage : un objectif ajouté après coup est validé dès la connexion s'il est déjà atteint.
+	collection:evaluateObjectives()
+	return collection
+end
+
+-- Cosmétiques équipés (titre, couleur de scanner), ou nil si le profil n'est pas sûr.
+function HuntWorld.cosmeticsOf(self: any, userId: number): any
+	local player = self._players[userId]
+	if player == nil or not player.ready then
+		return nil
+	end
+	local cosmetics = player.inventory:profile().cosmetics
+	return { title = cosmetics.title, scannerColor = cosmetics.scannerColor }
+end
+
+--[[
+	Ajoute un joueur. `rawProfile` : données lues dans le stockage (nil = nouveau joueur,
+	v1 ou v2 : migrées ici). options.ready = false : profil non chargé de manière sûre
+	(stockage indisponible, verrouillé ailleurs) → le joueur peut explorer et scanner,
+	mais aucune capture ne démarre tant que `attachProfile` n'a pas réussi.
+]]
+function HuntWorld.addPlayer(self: any, userId: number, now: number, rawProfile: any?, options: any?)
 	if self._players[userId] then
 		return
 	end
-	local done = profile ~= nil and profile.tutorialDone == true
+	local ready = not (options and options.ready == false)
+	local status = if ready then "Ready" else ((options and options.status) or "Unavailable")
+	local profile, err = ProfileSchema.migrate(if ready then rawProfile else nil, self:_schemaContext(userId))
+	if profile == nil then
+		-- Profil illisible ou d'une version plus récente : ne jamais l'écraser.
+		ready = false
+		status = if err == "FutureVersion" then "FutureVersion" else "Corrupt"
+		profile = ProfileSchema.new(self._wallClock())
+	end
+	assert(profile, "profil")
+	local collection = self:_newCollection(userId, profile)
+	local done = collection:tutorialDone()
 	local player: PlayerState = {
 		userId = userId,
-		inventory = SessionInventory.fromSnapshot(userId, if profile then profile.inventory else nil),
+		inventory = collection,
+		ready = ready,
+		profileStatus = status,
 		tutorialStep = TutorialFlow.initial(done),
 		tutorialMimic = nil,
 		scanReadyAt = -math.huge,
@@ -397,6 +509,63 @@ function HuntWorld.addPlayer(self: any, userId: number, now: number, profile: Pr
 		player.tutorialMimic = self:_newTutorialMimic(userId, now)
 	end
 	self._players[userId] = player
+end
+
+--[[
+	Profil enfin chargé pour un joueur qui jouait sans profil sûr (`ready = false`).
+	Aucune acquisition n'a pu avoir lieu entre-temps : on remplace simplement la collection.
+]]
+function HuntWorld.attachProfile(self: any, userId: number, rawProfile: any, _now: number): { Event }
+	local events = {}
+	local player = self._players[userId]
+	if player == nil or player.ready then
+		return events
+	end
+	local profile, err = ProfileSchema.migrate(rawProfile, self:_schemaContext(userId))
+	if profile == nil then
+		player.profileStatus = if err == "FutureVersion" then "FutureVersion" else "Corrupt"
+		push(events, "ProfileStatus", userId, { status = player.profileStatus })
+		return events
+	end
+	player.inventory = self:_newCollection(userId, profile)
+	player.ready = true
+	player.profileStatus = "Ready"
+	if player.inventory:tutorialDone() and player.tutorialStep ~= "Done" then
+		self:_finishTutorialSilently(player, events)
+	end
+	push(events, "ProfileStatus", userId, { status = "Ready" })
+	push(events, "CollectionSnapshot", userId, player.inventory:view())
+	return events
+end
+
+-- Le profil chargé indique un tutoriel déjà terminé : on retire le Mimic du tutoriel.
+function HuntWorld._finishTutorialSilently(self: any, player: PlayerState, events: { Event })
+	local record = player.tutorialMimic
+	if record and record.state ~= "Disguised" then
+		push(events, "MimicUpdate", player.userId, { mimicId = record.id, propId = record.slotId, state = "Hidden" })
+	end
+	player.tutorialMimic = nil
+	player.tutorialStep = "Done"
+	local tutorial = self._tutorialSlot
+	push(events, "TutorialUpdate", player.userId, { step = "Done", propId = if tutorial then tutorial.id else nil })
+end
+
+-- Le serveur a perdu le verrou du profil (ouvert ailleurs) : plus aucune acquisition.
+function HuntWorld.setProfileLost(self: any, userId: number): { Event }
+	local events = {}
+	local player = self._players[userId]
+	if player == nil then
+		return events
+	end
+	player.ready = false
+	player.profileStatus = "Lost"
+	push(events, "ProfileStatus", userId, { status = "Lost" })
+	return events
+end
+
+function HuntWorld.profileStatusOf(self: any, userId: number): string?
+	local player = self._players[userId]
+	return if player then player.profileStatus else nil
 end
 
 function HuntWorld.clientReady(self: any, userId: number, now: number): ({ Event }, any)
@@ -416,7 +585,8 @@ function HuntWorld.clientReady(self: any, userId: number, now: number): ({ Event
 		table.insert(list, self:_publicMimic(personal, now))
 	end
 	push(events, "WorldSnapshot", userId, { mimics = list })
-	push(events, "InventoryUpdate", userId, { snapshot = player.inventory:snapshot() })
+	push(events, "ProfileStatus", userId, { status = player.profileStatus })
+	push(events, "CollectionSnapshot", userId, player.inventory:view())
 	local tutorial = self._tutorialSlot
 	push(events, "TutorialUpdate", userId, {
 		step = player.tutorialStep,
@@ -454,16 +624,86 @@ function HuntWorld.removePlayer(self: any, userId: number, now: number): { Event
 	return kept
 end
 
+--[[
+	Profil à sauvegarder (référence vivante : ProfileService en fait une copie).
+	nil si le profil n'a pas été chargé de manière sûre : on n'écrit jamais un profil
+	vide ou provisoire par-dessus des données existantes.
+]]
 function HuntWorld.getProfile(self: any, userId: number): Profile?
 	local player = self._players[userId]
-	if player == nil then
+	if player == nil or not player.ready then
 		return nil
 	end
-	return {
-		version = PROFILE_VERSION,
-		inventory = player.inventory:snapshot(),
-		tutorialDone = player.tutorialStep == "Done",
-	}
+	if player.tutorialStep == "Done" then
+		player.inventory:setTutorialDone(true)
+	end
+	return player.inventory:profile()
+end
+
+-- ─── Collection : favoris, cosmétiques, réglages ───────────────────────
+
+function HuntWorld._collectionRequest(
+	self: any,
+	userId: number,
+	now: number,
+	apply: (player: PlayerState) -> (boolean, any)
+): ({ Event }, any)
+	local events = {}
+	local player = self._players[userId]
+	local function reply(payload: any)
+		push(events, "CollectionResult", userId, payload)
+		return events, payload
+	end
+	if player == nil then
+		return reply({ ok = false, reason = "UnknownPlayer" })
+	end
+	if not player.ready then
+		return reply({ ok = false, reason = "ProfileUnavailable" })
+	end
+	if not self._limiter:allow(userId, "Collection", now) then
+		return reply({ ok = false, reason = "RateLimited" })
+	end
+	local ok, result = apply(player)
+	if not ok then
+		return reply({ ok = false, reason = result })
+	end
+	push(events, "_ProfileChanged", userId, { important = false })
+	return reply({ ok = true, result = result })
+end
+
+function HuntWorld.setFavorite(self: any, userId: number, specimenId: any, value: any, now: number): ({ Event }, any)
+	return self:_collectionRequest(userId, now, function(player)
+		local ok, specimen = player.inventory:setFavorite(specimenId, value)
+		if not ok then
+			return false, specimen
+		end
+		return true, { updated = player.inventory:specimenView(specimen) }
+	end)
+end
+
+function HuntWorld.equipCosmetic(self: any, userId: number, kind: any, id: any, now: number): ({ Event }, any)
+	local events, reply = self:_collectionRequest(userId, now, function(player)
+		local ok, err = player.inventory:equip(kind, id)
+		if not ok then
+			return false, err
+		end
+		return true, { summary = player.inventory:summary() }
+	end)
+	-- Le titre est affiché à tous les joueurs : HuntServer met à jour l'attribut du joueur.
+	if reply.ok then
+		push(events, "_CosmeticsChanged", userId, self:cosmeticsOf(userId))
+	end
+	return events, reply
+end
+
+function HuntWorld.updateSettings(self: any, userId: number, settings: any, now: number): ({ Event }, any)
+	return self:_collectionRequest(userId, now, function(player)
+		local ok, err = player.inventory:setSettings(settings)
+		if not ok then
+			return false, err
+		end
+		return true, { summary = player.inventory:summary() }
+	end)
 end
 
 -- ─── Requêtes des joueurs ──────────────────────────────────────────────
@@ -629,6 +869,13 @@ function HuntWorld.startCapture(self: any, userId: number, position: any, mimicI
 	end
 	if self._ledger:activeFor(userId) then
 		return reply({ ok = false, reason = "AlreadyCapturing" })
+	end
+	-- Pas d'acquisition persistante sans profil chargé de manière sûre.
+	if not player.ready then
+		return reply({ ok = false, reason = "ProfileUnavailable" })
+	end
+	if player.inventory:isFull() then
+		return reply({ ok = false, reason = "CollectionFull" })
 	end
 	local slot = self:_slotOf(record)
 	if not Validation.isPosition(position) then

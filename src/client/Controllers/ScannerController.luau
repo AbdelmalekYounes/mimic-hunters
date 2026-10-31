@@ -21,6 +21,7 @@ local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared.Config.GameConfig)
 local MimicCatalog = require(Shared.Config.MimicCatalog)
+local Objectives = require(Shared.Config.Objectives)
 local Remotes = require(Shared.Net.Remotes)
 
 local Client = script.Parent.Parent
@@ -60,6 +61,8 @@ local REASONS: { [string]: string } = {
 	Expired = "Trop tard… il s'est faufilé ailleurs.",
 	AlreadyCapturing = "Termine d'abord ta capture en cours.",
 	UnknownMimic = "Ce Mimic n'est plus là.",
+	ProfileUnavailable = "Ton profil n'est pas encore sauvegardable : capture impossible pour l'instant.",
+	CollectionFull = "Collection pleine (2000 Mimics) : impossible d'en capturer davantage pour l'instant.",
 }
 
 local function rootPart(): BasePart?
@@ -251,7 +254,10 @@ local function radar(root: BasePart)
 	sphere.Name = "ScanWave"
 	sphere.Shape = Enum.PartType.Ball
 	sphere.Material = Enum.Material.ForceField
-	sphere.Color = Theme.Colors.Cyan
+	-- Couleur de scanner équipée (récompense d'objectif), Cyan par défaut.
+	local summary = ClientState.summary
+	local cosmetic = Objectives.cosmetic(summary and summary.cosmetics and summary.cosmetics.scannerColor)
+	sphere.Color = if cosmetic then Theme.rgb(cosmetic.color) else Theme.Colors.Cyan
 	sphere.Anchored = true
 	sphere.CanCollide = false
 	sphere.CanQuery = false
@@ -294,12 +300,25 @@ local function showSignal(band: string)
 	frame.Visible = true
 	refs.signalText.Text = "SIGNAL : " .. spec.text
 	refs.signalText.TextColor3 = spec.color
-	for i, bar in refs.signalBars do
-		bar.BackgroundColor3 = if i <= spec.bars then spec.color else Theme.Colors.Muted
-		bar.BackgroundTransparency = if i <= spec.bars then 0 else 0.6
+	-- Retour sonore lisible sans regarder l'écran : un bip par barre, de plus en plus aigu,
+	-- et les barres s'allument au même rythme. Aucun signal : un son sourd.
+	for _, bar in refs.signalBars do
+		bar.BackgroundColor3 = Theme.Colors.Muted
+		bar.BackgroundTransparency = 0.6
 	end
 	if spec.bars > 0 then
-		Audio.play("ScanHit", 0.8 + spec.bars * 0.15)
+		for i = 1, spec.bars do
+			task.delay((i - 1) * 0.12, function()
+				local bar = refs.signalBars[i]
+				bar.BackgroundColor3 = spec.color
+				bar.BackgroundTransparency = 0
+				bar.Size = UDim2.new(0, 10, i / 3 + 0.15, 0)
+				Animate.tween(bar, 0.12, { Size = UDim2.new(0, 10, i / 3, 0) })
+				Audio.play("ScanHit", 0.75 + i * 0.22)
+			end)
+		end
+	else
+		Audio.play("Ordinary", 0.7)
 	end
 	signalToken += 1
 	local token = signalToken

@@ -1,4 +1,4 @@
-# MIMIC HUNTERS — Game Design (V0.1)
+# MIMIC HUNTERS — Game Design (V0.2)
 
 ## 1. Promesse
 
@@ -111,7 +111,55 @@ allumés, parc aux arbres violets et turquoise, champignons lumineux, arche de p
 néon, cristaux flottants. Couleurs franches, formes simples, grands yeux. Pas de violence,
 pas d'horreur : les Mimics sont malicieux, pas menaçants.
 
-## 9. Hors périmètre V0.1 (volontairement)
+## 9. Collection persistante (V0.2)
 
-Économie, achats Robux, échanges, musée, mutations, événements, sauvegarde DataStore.
-Les interfaces de sauvegarde sont prêtes (voir ARCHITECTURE.md).
+Chaque capture donne un **exemplaire** permanent, à soi : identifiant unique, espèce, rareté,
+mutation éventuelle, petite variation d'apparence (teinte, taille ±7 %), date, favori. On peut en
+posséder plusieurs de la même espèce : deux Chairy ne sont jamais tout à fait identiques.
+
+Panneau **Collection** (bouton CODEX ou touche C) :
+- **Codex** : les 6 espèces, découvertes ou en silhouette avec un indice (« Se cache en chaise »),
+  exemplaires possédés, pastilles des 3 apparences trouvées, probabilités des mutations ;
+- **Inventaire** : tous les exemplaires, par pages ; filtres rareté / espèce / mutation / favoris ;
+  tri récents ou rareté ; fiche avec aperçu 3D animé, date, numéro, taille, favori ;
+- **Objectifs** : progression et récompenses, réglages ;
+- compteur permanent : espèces 2/6, apparences 2/18, nombre de Mimics.
+
+## 10. Mutations (cosmétiques)
+
+| Mutation | Probabilité par capture | Apparence |
+|---|---|---|
+| Standard | 94,5 % | couleurs de l'espèce, variation personnelle |
+| Chromatic | 4 % | palette irisée qui glisse lentement, léger éclat lumineux |
+| Spectral | 1,5 % | translucide, yeux lumineux, trois petites lueurs en orbite |
+
+Tirage côté serveur à la capture réussie ; le Mimic du tutoriel est toujours Standard. Aucun
+effet sur le gameplay. Révélation : éclair et anneau aux couleurs de la mutation, le Mimic prend
+son apparence, puis la capture continue (≈ 0,8 s de plus) ; carte de capture dédiée avec la
+probabilité ; annonce aux autres joueurs du serveur. Avec ~1 capture par minute, une Chromatic
+arrive en moyenne vers la 25e capture, une Spectral vers la 67e.
+
+## 11. Progression du collectionneur
+
+| Objectif | Récompense garantie |
+|---|---|
+| Première capture | titre « Apprenti chasseur » |
+| Trois espèces | couleur de scanner Menthe |
+| Dix captures | couleur de scanner Corail |
+| Première Chromatic | couleur de scanner Prisme |
+| Première Spectral | titre « Murmure spectral » |
+| Collection complète (6 espèces) | titre « Maître des Mimics » |
+
+Le titre s'affiche au-dessus du personnage (visible par tous) ; la couleur change l'onde du
+scanner. Pas de monnaie, pas de rebirth, pas d'arbre d'amélioration.
+
+## 12. Ressenti (V0.2)
+
+Scanner : un bip par barre de signal, de plus en plus aigu. Capture : écrasement puis étirement,
+particules et anneau dosés selon la rareté. Pastille « ! » sur CODEX quand il y a du nouveau.
+Réglages Sons et Effets réduits, sauvegardés.
+
+## 13. Hors périmètre V0.2 (volontairement)
+
+Économie et monnaies, achats Robux, échanges, musée, base personnelle, PvP, mutations avancées,
+événements. Le modèle de données les prépare (voir DATA_SCHEMA.md) sans les commencer.

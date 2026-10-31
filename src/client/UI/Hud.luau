@@ -51,10 +51,6 @@ export type Refs = {
 	popupName: TextLabel,
 	popupRarity: TextLabel,
 	popupCount: TextLabel,
-	codex: Frame,
-	codexGrid: ScrollingFrame,
-	codexClose: TextButton,
-	codexProgress: TextLabel,
 	touch: boolean,
 }
 
@@ -337,6 +333,8 @@ function Hud.build(): Refs
 	-- ── Carte de découverte (centre) ──
 	local popup = Theme.panel({
 		Name = "Discovery",
+		-- Au-dessus du panneau Collection (ZIndex 10) si une capture se termine pendant sa lecture.
+		ZIndex = 20,
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Size = UDim2.fromOffset(300, 340),
 		Position = UDim2.fromScale(0.5, 0.42),
@@ -393,65 +391,6 @@ function Hud.build(): Refs
 		Position = UDim2.fromOffset(0, 292),
 		MaxTextSize = 18,
 		Parent = popup,
-	})
-
-	-- ── Codex (panneau latéral) ──
-	local codex = Theme.panel({
-		Name = "Codex",
-		AnchorPoint = Vector2.new(0, 0.5),
-		Size = UDim2.new(0.5, 0, 0.74, 0),
-		Position = UDim2.new(0, 12, 0.52, 0),
-		Visible = false,
-		Parent = gui,
-	})
-	create("UISizeConstraint", { MaxSize = Vector2.new(560, 620), MinSize = Vector2.new(300, 260), Parent = codex })
-	Theme.padding(12).Parent = codex
-	Theme.text({
-		Text = "CODEX DES MIMICS",
-		Font = Theme.Fonts.Title,
-		TextColor3 = C.Pink,
-		Size = UDim2.new(1, -50, 0, 30),
-		TextXAlignment = Enum.TextXAlignment.Left,
-		MaxTextSize = 26,
-		Parent = codex,
-	})
-	local codexProgress = Theme.text({
-		Name = "Progress",
-		Text = "0 / 6 découverts",
-		TextColor3 = C.Muted,
-		Size = UDim2.new(1, -50, 0, 20),
-		Position = UDim2.fromOffset(0, 32),
-		TextXAlignment = Enum.TextXAlignment.Left,
-		MaxTextSize = 16,
-		Parent = codex,
-	})
-	local codexClose = Theme.button({
-		Name = "Close",
-		Text = "X",
-		AnchorPoint = Vector2.new(1, 0),
-		Size = UDim2.fromOffset(42, 42),
-		Position = UDim2.fromScale(1, 0),
-		BackgroundColor3 = Color3.fromRGB(110, 50, 80),
-		StrokeColor = C.Pink,
-		Parent = codex,
-	})
-	local codexGrid = create("ScrollingFrame", {
-		Name = "Grid",
-		Size = UDim2.new(1, 0, 1, -62),
-		Position = UDim2.fromOffset(0, 60),
-		BackgroundTransparency = 1,
-		BorderSizePixel = 0,
-		ScrollBarThickness = 6,
-		AutomaticCanvasSize = Enum.AutomaticSize.Y,
-		CanvasSize = UDim2.new(),
-		Parent = codex,
-	}) :: ScrollingFrame
-	create("UIGridLayout", {
-		CellSize = UDim2.fromOffset(150, 200),
-		CellPadding = UDim2.fromOffset(10, 10),
-		SortOrder = Enum.SortOrder.LayoutOrder,
-		HorizontalAlignment = Enum.HorizontalAlignment.Center,
-		Parent = codexGrid,
 	})
 
 	-- ── Disposition (HudLayout), recalculée à chaque changement de taille ──
@@ -513,10 +452,6 @@ function Hud.build(): Refs
 		popupName = popupName,
 		popupRarity = popupRarity,
 		popupCount = popupCount,
-		codex = codex,
-		codexGrid = codexGrid,
-		codexClose = codexClose,
-		codexProgress = codexProgress,
 		touch = touch,
 	}
 end

@@ -120,6 +120,10 @@ test.cmd ─▶ tools/test-all.ps1
 | Connexions / déconnexions | Studio · client + multiplayer | 1 joueur réel, 2 clients, `LeaveTest`, `AddPlayers` |
 | Interface PC / mobile | Studio · client-pc / client-mobile | HUD construit, disposition PC vs tactile, bandeau, carte de découverte, compteur |
 | Protections | Studio · server + Lune | portée, données invalides, ids inconnus, spam (Lune) |
+| Sauvegardes (V0.2) | Lune + Studio · server | pannes injectées, budget, verrou frais / périmé, deux serveurs concurrents, verrou perdu, reconnexion, version future jamais écrasée ; cycle complet sur le vrai `ProfileService` de Studio (stockage mémoire) |
+| Exemplaires et idempotence | Lune + Studio | identifiants uniques sur 3 sessions, même événement de capture jamais accordé deux fois (y compris après rechargement) |
+| Mutations | Lune + Studio | distribution sur 200 000 tirages, tutoriel Standard, cohérence après reconnexion ; capture réelle forcée (serveur) et capture rare par le réseau (client PC : Chromatic, mobile : Spectral) |
+| Codex, inventaire, objectifs | Studio · client-pc / client-mobile | panneau dans l'écran, pages réellement visibles, codex découvert/manquant, fiche, favori aller-retour, objectif validé, titre affiché au-dessus du personnage |
 
 Contrôle de pertinence : en réintroduisant volontairement le bug de pivot corrigé en V0.1,
 la suite Studio échoue sur `carte.objets_poses_au_sol` (« V13 bas de l'objet à Y = −8,75 ») et
@@ -132,10 +136,20 @@ la suite Studio échoue sur `carte.objets_poses_au_sol` (« V13 bas de l'objet �
 | Fenêtres Studio sur ton bureau | **0** | oui (2 à 3) | `EnumWindows` sur le bureau de l'utilisateur, toutes les 250 ms |
 | Studio prend le premier plan | **non** (10/10 exécutions) | **oui dans 2 essais RunScript sur 4** (preuves de concept, avant `test.cmd`) | `GetForegroundWindow` → PID |
 | Clavier / souris simulés | aucun | aucun | — |
+| **Ton clavier et ta souris vers Studio** | **passent** (constaté le 31/10/2026) : tes clics et touches peuvent atteindre le Studio du bureau caché | idem | journal des requêtes : captures, impulsions et déplacements non demandés par le test |
 | Processus arrêtés | uniquement ceux lancés par le test (délai dépassé) | idem | PID / parent PID |
 | CPU, GPU, mémoire | **partagés** : Studio consomme environ 1 à 2 Go et du GPU pendant ~75 s | idem | non isolé |
 | Son | coupé par la suite client (`Volume = 0`) | idem | **non mesuré** (pas d'écoute automatisée) |
 | Dialogues de Studio (mise à jour, connexion expirée…) | invisibles → le test échoue au bout du délai (420 s par défaut) | visibles | — |
+
+**Entrées de l'utilisateur.** Le bureau caché empêche Studio de s'afficher et de prendre le
+premier plan, mais **pas** de recevoir le clavier et la souris : des captures, impulsions et
+déplacements parasites sont apparus pendant que le PC était utilisé (requêtes non émises par
+le test, visibles dans le journal horodaté du rapport). Cause probable : l'entrée brute de
+Windows (Raw Input), non séparée par bureau ; non prouvée, faute de pouvoir simuler des
+entrées sur ton bureau. Parade dans la suite client : priorité maximale qui absorbe les
+touches et clics du jeu, couche transparente sur l'écran, personnage immobile. Le jeu n'est
+pas modifié. La VM, elle, est totalement isolée.
 
 Le bureau caché est un objet Windows standard (`CreateDesktop`) : il est créé pour la durée du
 test, jamais affiché (`SwitchDesktop` n'est pas appelé), et disparaît avec les processus. Ce

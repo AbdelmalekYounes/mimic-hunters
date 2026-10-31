@@ -9,9 +9,12 @@ local Sounds = require(ReplicatedStorage:WaitForChild("Shared").Config.Sounds)
 
 local Audio = {}
 
+-- Réglage du joueur « Sons » (sauvegardé dans son profil).
+Audio.muted = false
+
 local function make(name: string, speedMultiplier: number?): Sound?
 	local spec = Sounds[name]
-	if spec == nil then
+	if spec == nil or Audio.muted then
 		return nil
 	end
 	local sound = Instance.new("Sound")

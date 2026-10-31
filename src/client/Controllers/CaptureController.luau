@@ -224,6 +224,9 @@ local function onCaptureResolved(payload: any)
 	else
 		local message = if payload.reason == "Timeout"
 			then "Trop lent ! Le Mimic s'est enfui."
+			elseif
+				payload.reason == "ProfileUnavailable"
+			then "Profil indisponible : cette capture n'a pas pu être conservée."
 			else "Le Mimic s'est échappé ! Retrouve-le."
 		setFeedback("ÉCHAPPÉ !", Theme.Colors.Red)
 		ClientState.toast(message)

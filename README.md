@@ -1,10 +1,17 @@
-# MIMIC HUNTERS — V0.1 (vertical slice)
+# MIMIC HUNTERS — V0.2 (collection persistante)
 
 Jeu Roblox multijoueur de chasse et de collection : des créatures, les **Mimics**, se
 déguisent en objets ordinaires. Le joueur les repère grâce à des indices, les examine,
 puis les stabilise avec un court minijeu pour les capturer.
 
 **Chercher → Détecter → Capturer → Découvrir → Collectionner.**
+
+Nouveautés de la V0.2 (branche `feature/v0.2-collection`) :
+- **collection persistante** (DataStore, verrou de session, sauvegarde après chaque capture) ;
+- chaque capture est un **exemplaire individuel** (identifiant, rareté, apparence unique, date, favori) ;
+- deux **mutations** cosmétiques rares : Chromatic (4 %) et Spectral (1,5 %) ;
+- panneau **Collection** : Codex, Inventaire filtrable avec fiche 3D, Objectifs ;
+- **objectifs du collectionneur** avec titres et couleurs de scanner garantis.
 
 Projet indépendant, créé de zéro (aucun code ni asset repris d'un autre projet).
 Rien n'est publié : la place se construit et se teste en local.
@@ -52,14 +59,14 @@ Dans ce cas, mettez-le à jour avec `rojo plugin install`.
 Windows caché ; détails et limites dans [docs/TESTING.md](docs/TESTING.md) :
 
 ```bat
-test.cmd               :: ligne de commande + 4 sessions Roblox Studio (≈ 75 s)
+test.cmd               :: ligne de commande + 4 sessions Roblox Studio, 60 tests (≈ 2 min)
 test.cmd -SkipStudio   :: ligne de commande seulement (≈ 2 s)
 ```
 
 Rapport : `build/test-reports/latest.md`. Commandes individuelles :
 
 ```bash
-lune run tests/run          # 158 tests unitaires et d'intégration (logique pure)
+lune run tests/run          # 223 tests unitaires et d'intégration (logique pure)
 lune run tests/run capture  # seulement les fichiers dont le nom contient « capture »
 lune run tests/check        # compile tous les fichiers .luau (vérification de syntaxe)
 selene src                  # lint (std Roblox)
@@ -82,7 +89,7 @@ et lancez `luau-lsp analyze` avec les définitions Roblox et un `sourcemap.json`
 | Scanner | `E` | bouton SCAN | X |
 | Examiner / Capturer | `F` ou clic sur l'objet | toucher l'objet ou bouton | Y |
 | Impulsion (minijeu) | `Espace` ou clic | bouton IMPULSION | A |
-| Codex | `C` | bouton CODEX | Select |
+| Collection (codex, inventaire, objectifs) | `C` | bouton CODEX | Select |
 
 ## Arborescence
 
@@ -115,6 +122,8 @@ docs/                  GAME_DESIGN, ARCHITECTURE, ROADMAP, V01_VALIDATION, scree
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — choix techniques, flux réseau, sécurité
 - [docs/ROADMAP.md](docs/ROADMAP.md) — jalons et suite
 - [docs/V01_VALIDATION.md](docs/V01_VALIDATION.md) — ce qui est implémenté, testé, et les limites
+- [docs/V02_VALIDATION.md](docs/V02_VALIDATION.md) — bilan de la V0.2 (sauvegardes, collection, mutations, objectifs)
+- [docs/DATA_SCHEMA.md](docs/DATA_SCHEMA.md) — schéma du profil, migrations, sauvegarde et verrou de session
 - [docs/TESTING.md](docs/TESTING.md) — tests automatisés Studio sans monopoliser le PC
 - [docs/VM_SETUP.md](docs/VM_SETUP.md) — VM VMware pour les tests graphiques (`test-vm.cmd`)
 
@@ -127,5 +136,9 @@ Il expose aussi le monde dans la barre de commande (contexte *Serveur*) :
 local w = _G.MimicHuntWorld
 for _, m in w:sharedMimics() do print(m.id, m.speciesId, m.slotId, m.state) end
 ```
+
+Autres outils Studio : `_G.MimicProfiles` (service de profils et stockage utilisé) et l'attribut
+`MH_ForceMutation` de Workspace (`"Chromatic"` ou `"Spectral"`) qui impose la mutation des
+captures suivantes, pour les tests visuels.
 
 Ces accès sont désactivés hors Studio (`RunService:IsStudio()`).
