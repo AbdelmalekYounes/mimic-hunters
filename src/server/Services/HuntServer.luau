@@ -38,6 +38,7 @@ local ProfileService = require(Server.Core.ProfileService)
 local MapLayout = require(Server.Map.MapLayout)
 local DataStoreBackend = require(script.Parent.DataStoreBackend)
 local MuseumServer = require(script.Parent.MuseumServer)
+local AnalyticsServer = require(script.Parent.AnalyticsServer)
 
 local TICK_INTERVAL = 0.2
 local SAVE_STEP_INTERVAL = 1
@@ -91,6 +92,9 @@ function HuntServer.start()
 		return os.clock()
 	end
 
+	-- Mesures de playtest (V0.3.1) : indépendantes des profils, envoyées en jeu publié.
+	local analytics = AnalyticsServer.start({ now = now })
+
 	local dispatch: (events: { HuntWorld.Event }) -> ()
 	-- Musées (V0.3) : créés après le dispatch, qui leur transmet ses événements internes.
 	local museum: any = nil
@@ -141,6 +145,7 @@ function HuntServer.start()
 
 	dispatch = function(events: { HuntWorld.Event })
 		for _, event in events do
+			analytics.observe(event)
 			if string.sub(event.name, 1, 1) == "_" then
 				-- Événement interne : jamais envoyé au client.
 				if event.name == "_ProfileChanged" and event.userId then
@@ -296,6 +301,7 @@ function HuntServer.start()
 
 	local function onPlayerAdded(player: Player)
 		local userId = player.UserId
+		analytics.join(userId)
 		remotes.ProfileStatus:FireClient(player, { status = "Loading" })
 		local status, data, sessionId = profiles:load(userId, function()
 			return inGame(player)
@@ -337,7 +343,9 @@ function HuntServer.start()
 	})
 	if studio then
 		-- selene: allow(global_usage)
-		(_G :: any).MimicMuseum = museum
+		local globals = _G :: any
+		globals.MimicMuseum = museum
+		globals.MimicAnalytics = analytics
 	end
 
 	world:populate(now())
@@ -349,6 +357,7 @@ function HuntServer.start()
 	Players.PlayerRemoving:Connect(guarded("PlayerRemoving", function(player: Player)
 		local userId = player.UserId
 		pendingReady[userId] = nil
+		analytics.leave(userId, player)
 		local data = world:getProfile(userId)
 		-- Musée d'abord : défis annulés, parcelle libérée (les exemplaires restent au profil).
 		museum.onPlayerRemoving(userId)
@@ -363,6 +372,23 @@ function HuntServer.start()
 	-- Fermeture du serveur : sauvegarde finale de tous les profils (Roblox accorde ~30 s).
 	game:BindToClose(function()
 		profiles:closeAll(getProfile)
+	end)
+
+	-- Étape vue seulement par le client : prise en compte une fois par session, liste blanche.
+	local milestones: { [number]: { [string]: boolean } } = {}
+	remotes.ReportMilestone.OnServerEvent:Connect(guarded("ReportMilestone", function(player: Player, name: any)
+		if name ~= "CodexOpened" then
+			return
+		end
+		local seen = milestones[player.UserId] or {}
+		milestones[player.UserId] = seen
+		if not seen[name] then
+			seen[name] = true
+			analytics.observe({ name = "_CodexOpened", userId = player.UserId, payload = {} })
+		end
+	end))
+	Players.PlayerRemoving:Connect(function(player: Player)
+		milestones[player.UserId] = nil
 	end)
 
 	remotes.ClientReady.OnServerEvent:Connect(guarded("ClientReady", function(player: Player)

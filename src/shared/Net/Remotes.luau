@@ -30,6 +30,9 @@ Remotes.ClientToServer = table.freeze({
 	"SetMuseumStyle",
 	"RequestMuseums",
 	"StartMuseumHunt",
+	-- Mesures de playtest (V0.3.1) : étapes vues seulement par le client (Codex ouvert).
+	-- Sans aucun effet sur le jeu ; une seule prise en compte par session.
+	"ReportMilestone",
 })
 
 Remotes.ServerToClient = table.freeze({
