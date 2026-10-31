@@ -83,6 +83,7 @@ local PROFILE_MESSAGES = {
 	FutureVersion = "Ton profil vient d'une version plus récente du jeu : captures désactivées ici.",
 	Corrupt = "Profil illisible : captures désactivées pour protéger tes données.",
 	Lost = "Profil ouvert ailleurs : captures arrêtées.",
+	Degraded = "Sauvegarde momentanément en panne : captures en pause, tes Mimics sont gardés en attendant.",
 }
 Remotes.get("ProfileStatus").OnClientEvent:Connect(function(payload)
 	local previous = ClientState.profileStatus

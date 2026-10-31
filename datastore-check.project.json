@@ -1,0 +1,24 @@
+{
+  "name": "MimicHunters_DataStoreCheck",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "Shared": { "$path": "src/shared" }
+    },
+    "ServerScriptService": {
+      "Server": { "$path": "src/server" },
+      "DataStoreCheck": { "$path": "tests/datastore" }
+    },
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "Client": { "$path": "src/client" }
+      }
+    },
+    "Lighting": {
+      "$properties": { "Technology": "Voxel" }
+    },
+    "Workspace": {
+      "$properties": { "StreamingEnabled": false }
+    }
+  }
+}

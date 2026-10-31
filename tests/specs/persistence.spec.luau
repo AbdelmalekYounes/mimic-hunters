@@ -360,4 +360,102 @@ describe("Persistance — musées", function()
 		expect(count).toBe(4)
 		expect(stored.museum.slots[1]).toBe(ProfileSchema.specimenId(A, 2))
 	end)
+
+	-- Scénarios 5 à 9 du jalon 2 (V0.3.1) en un aller-retour complet entre deux serveurs.
+	it("conserve tout le profil entre deux serveurs : mutations, favoris, 6 vitrines, styles, objectifs", function()
+		local backend, env = MemoryBackend.new(), environment()
+		local stored = ProfileSchema.new(0)
+		stored.tutorialDone = true
+		-- Même espèce en trois mutations (scénario 5), plus trois autres exemplaires.
+		local plan = {
+			{ "chairy", "Standard" },
+			{ "chairy", "Chromatic" },
+			{ "chairy", "Spectral" },
+			{ "lumino", "Standard" },
+			{ "posty", "Chromatic" },
+			{ "vendoo", "Standard" },
+		}
+		for i, spec in plan do
+			local id = ProfileSchema.specimenId(A, i)
+			stored.specimens[id] = {
+				id = id,
+				speciesId = spec[1],
+				rarity = Fixtures.MimicCatalog.get(spec[1]).rarity,
+				mutation = spec[2],
+				seed = 1000 + i,
+				acquiredAt = i,
+				favorite = false,
+			}
+			stored.codex[spec[1]] = { discoveredAt = 0, order = i, captured = 1, mutations = { [spec[2]] = true } }
+		end
+		stored.nextSerial = #plan + 1
+		stored.stats.totalCaptures = #plan
+		stored.cosmetics.unlocked = { title_apprentice = true, color_mint = true, pedestal_star = true }
+		stored.objectives.first_capture = 5
+		backend:poke("player_" .. A, { data = stored, meta = {} })
+
+		local one = withMuseum(server(backend, env, "job1", 60))
+		join(one, A)
+		one.museum:join(A, 0)
+		local collection = one.world:inventoryOf(A)
+		-- Favoris (scénario 6), six vitrines (7), quatre réglages de style (8).
+		expect((collection:setFavorite(ProfileSchema.specimenId(A, 2), true))).toBe(true)
+		expect((collection:setFavorite(ProfileSchema.specimenId(A, 5), true))).toBe(true)
+		for slot = 1, 6 do
+			local _, reply = one.museum:setExhibit(A, slot, ProfileSchema.specimenId(A, 7 - slot), slot)
+			expect(reply.ok).toBe(true)
+		end
+		local styles = { wall = "night", lighting = "lantern", pedestal = "pedestal_star", theme = "lab" }
+		for kind, id in styles do
+			local _, reply = one.museum:setStyle(A, kind, id, 10)
+			expect(reply.ok).toBe(true)
+		end
+		-- Cosmétiques équipés et statistiques de Museum Hunt (scénario 9).
+		expect((collection:equip("title", "title_apprentice"))).toBe(true)
+		expect((collection:equip("scannerColor", "color_mint"))).toBe(true)
+		collection:recordHunt(4242, 260, 3, 3)
+		one.museum:leave(A, 20)
+		expect(leave(one, A)).toBe(true)
+
+		local two = withMuseum(server(backend, env, "job2", 61))
+		join(two, A)
+		local profile = two.world:getProfile(A)
+		for i, spec in plan do
+			local specimen = profile.specimens[ProfileSchema.specimenId(A, i)]
+			expect(specimen.speciesId).toBe(spec[1])
+			expect(specimen.mutation).toBe(spec[2])
+			expect(specimen.seed).toBe(1000 + i)
+			expect(specimen.favorite).toBe(i == 2 or i == 5)
+		end
+		for slot = 1, 6 do
+			expect(profile.museum.slots[slot]).toBe(ProfileSchema.specimenId(A, 7 - slot))
+		end
+		for kind, id in styles do
+			expect(profile.museum[kind]).toBe(id)
+		end
+		expect(profile.objectives.first_capture).toBe(5)
+		expect(profile.cosmetics.unlocked.pedestal_star).toBe(true)
+		expect(profile.cosmetics.title).toBe("title_apprentice")
+		expect(profile.cosmetics.scannerColor).toBe("color_mint")
+		expect(profile.hunts.best).toBe(260)
+		expect(profile.hunts.completed).toBe(1)
+		expect(profile.hunts.museums["4242"]).toBeTruthy()
+		expect(profile.nextSerial).toBe(#plan + 1)
+	end)
+
+	it("refuse toute capture tant que la sauvegarde est en panne prolongée", function()
+		local backend, env = MemoryBackend.new(), environment()
+		local one = server(backend, env, "job1", 62)
+		join(one, A)
+		local events = one.world:setSaveHealthy(A, false)
+		expect(named(events, "ProfileStatus", A)[1].payload.status).toBe("Degraded")
+		local result, reason = capture(one, A, 10)
+		expect(result).toBeNil()
+		expect(reason).toBe("SaveUnavailable")
+		-- Le profil reste chargé (il sera sauvegardé dès que possible).
+		expect(one.world:getProfile(A)).toBeTruthy()
+		one.world:setSaveHealthy(A, true)
+		local again = capture(one, A, 30)
+		expect(again and again.success).toBe(true)
+	end)
 end)

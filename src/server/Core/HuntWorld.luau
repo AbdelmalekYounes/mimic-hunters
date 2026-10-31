@@ -47,6 +47,8 @@ type PlayerState = {
 	-- Profil chargé de manière sûre : les acquisitions sont autorisées et sauvegardées.
 	ready: boolean,
 	profileStatus: string,
+	-- Sauvegardes en échec répétées : profil chargé, mais acquisitions suspendues (V0.3.1).
+	saveBlocked: boolean?,
 	tutorialStep: TutorialFlow.Step,
 	tutorialMimic: MimicStateMachine.Record?,
 	scanReadyAt: number,
@@ -92,6 +94,8 @@ function HuntWorld.new(options: any)
 	self._mutations = options.mutations
 	self._cosmeticDefaults = options.cosmeticDefaults or {}
 	self._cosmeticKind = options.cosmeticKind
+	-- Journal du serveur (réparations de profils) ; silencieux par défaut (tests).
+	self._log = options.log or function(_: string) end
 	self._museumStyles = options.museumStyles
 	self._slotList = {} :: { Slot }
 	self._slots = {} :: { [string]: Slot }
@@ -483,13 +487,23 @@ end
 	(stockage indisponible, verrouillé ailleurs) → le joueur peut explorer et scanner,
 	mais aucune capture ne démarre tant que `attachProfile` n'a pas réussi.
 ]]
+-- Exemplaires illisibles mis en quarantaine au chargement : signalés dans le journal.
+function HuntWorld._logRepair(self: any, userId: number, dropped: number?)
+	if dropped and dropped > 0 then
+		self._log(
+			string.format("[Profils] joueur %d : %d élément(s) illisible(s) mis en quarantaine", userId, dropped)
+		)
+	end
+end
+
 function HuntWorld.addPlayer(self: any, userId: number, now: number, rawProfile: any?, options: any?)
 	if self._players[userId] then
 		return
 	end
 	local ready = not (options and options.ready == false)
 	local status = if ready then "Ready" else ((options and options.status) or "Unavailable")
-	local profile, err = ProfileSchema.migrate(if ready then rawProfile else nil, self:_schemaContext(userId))
+	local profile, err, dropped = ProfileSchema.migrate(if ready then rawProfile else nil, self:_schemaContext(userId))
+	self:_logRepair(userId, dropped)
 	if profile == nil then
 		-- Profil illisible ou d'une version plus récente : ne jamais l'écraser.
 		ready = false
@@ -525,7 +539,8 @@ function HuntWorld.attachProfile(self: any, userId: number, rawProfile: any, _no
 	if player == nil or player.ready then
 		return events
 	end
-	local profile, err = ProfileSchema.migrate(rawProfile, self:_schemaContext(userId))
+	local profile, err, dropped = ProfileSchema.migrate(rawProfile, self:_schemaContext(userId))
+	self:_logRepair(userId, dropped)
 	if profile == nil then
 		player.profileStatus = if err == "FutureVersion" then "FutureVersion" else "Corrupt"
 		push(events, "ProfileStatus", userId, { status = player.profileStatus })
@@ -564,6 +579,38 @@ function HuntWorld.setProfileLost(self: any, userId: number): { Event }
 	player.ready = false
 	player.profileStatus = "Lost"
 	push(events, "ProfileStatus", userId, { status = "Lost" })
+	return events
+end
+
+--[[
+	Santé de la sauvegarde (ProfileService.onHealth). En panne prolongée, le profil reste
+	chargé (il sera sauvegardé dès que possible) mais plus aucune acquisition n'est acceptée :
+	statut « Degraded », message au joueur. Retour à « Ready » au premier succès.
+]]
+function HuntWorld.setSaveHealthy(self: any, userId: number, healthy: boolean): { Event }
+	local events = {}
+	local player = self._players[userId]
+	if player == nil or not player.ready then
+		return events
+	end
+	if player.profileStatus ~= "Ready" and player.profileStatus ~= "Degraded" then
+		return events
+	end
+	player.saveBlocked = not healthy
+	player.profileStatus = if healthy then "Ready" else "Degraded"
+	push(events, "ProfileStatus", userId, { status = player.profileStatus })
+	return events
+end
+
+-- Statut d'un profil non chargé (ex. enregistrement illisible découvert lors d'un nouvel essai).
+function HuntWorld.setProfileStatus(self: any, userId: number, status: string): { Event }
+	local events = {}
+	local player = self._players[userId]
+	if player == nil or player.ready then
+		return events
+	end
+	player.profileStatus = status
+	push(events, "ProfileStatus", userId, { status = status })
 	return events
 end
 
@@ -878,6 +925,10 @@ function HuntWorld.startCapture(self: any, userId: number, position: any, mimicI
 	-- Pas d'acquisition persistante sans profil chargé de manière sûre.
 	if not player.ready then
 		return reply({ ok = false, reason = "ProfileUnavailable" })
+	end
+	-- Ni pendant une panne prolongée de la sauvegarde (rien ne pourrait être conservé).
+	if player.saveBlocked then
+		return reply({ ok = false, reason = "SaveUnavailable" })
 	end
 	if player.inventory:isFull() then
 		return reply({ ok = false, reason = "CollectionFull" })

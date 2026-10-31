@@ -76,6 +76,9 @@ function HuntServer.start()
 		mutations = mutationSource,
 		objectives = Objectives.list(),
 		cosmeticDefaults = Objectives.defaults(),
+		log = function(message: string)
+			warn(message)
+		end,
 		cosmeticKind = function(id: string): string?
 			local cosmetic = Objectives.cosmetic(id)
 			return if cosmetic then cosmetic.kind else nil
@@ -109,6 +112,10 @@ function HuntServer.start()
 			if player then
 				player:Kick("Ton profil MIMIC HUNTERS a été ouvert sur un autre serveur. Reconnecte-toi.")
 			end
+		end,
+		-- Sauvegardes en échec répétées (ou rétablies) : acquisitions suspendues (ou reprises).
+		onHealth = function(userId: number, healthy: boolean)
+			dispatch(world:setSaveHealthy(userId, healthy))
 		end,
 		-- En mémoire, pas de limite d'écriture par clé : inutile d'attendre entre deux sauvegardes.
 		config = if inMemory then { MinSaveInterval = 0, LockedRetryDelay = 1 } else nil,
@@ -239,11 +246,12 @@ function HuntServer.start()
 	-- Clients qui ont dit « prêt » avant la fin du chargement de leur profil.
 	local pendingReady: { [number]: boolean } = {}
 
-	-- Profil chargé mais illisible par ce serveur (version future, données corrompues) :
-	-- on libère le verrou SANS écrire, pour ne jamais écraser ces données.
-	local function releaseUntouched(userId: number)
+	-- Profil chargé mais illisible par ce serveur (version future, données corrompues), ou
+	-- joueur parti pendant le chargement : on libère le verrou SANS écrire, pour ne jamais
+	-- écraser ces données. Seule la session de CE chargement est visée (`sessionId`).
+	local function releaseUntouched(userId: number, sessionId: string?)
 		task.spawn(function()
-			profiles:release(userId, nil)
+			profiles:release(userId, nil, sessionId)
 		end)
 	end
 
@@ -260,17 +268,23 @@ function HuntServer.start()
 				if status ~= "Unavailable" and status ~= "Locked" then
 					return -- version future ou données corrompues : réessayer ne changera rien
 				end
-				local loaded, data = profiles:load(userId)
+				local loaded, data, sessionId = profiles:load(userId, function()
+					return inGame(player)
+				end)
 				if not inGame(player) then
 					if loaded == "Ready" then
-						releaseUntouched(userId)
+						releaseUntouched(userId, sessionId)
 					end
+					return
+				end
+				if loaded == "Corrupt" then
+					dispatch(world:setProfileStatus(userId, "Corrupt"))
 					return
 				end
 				if loaded == "Ready" then
 					dispatch(world:attachProfile(userId, data, now()))
 					if world:profileStatusOf(userId) ~= "Ready" then
-						releaseUntouched(userId)
+						releaseUntouched(userId, sessionId)
 					end
 					applyCosmetics(userId)
 					museum.refresh(userId)
@@ -283,18 +297,20 @@ function HuntServer.start()
 	local function onPlayerAdded(player: Player)
 		local userId = player.UserId
 		remotes.ProfileStatus:FireClient(player, { status = "Loading" })
-		local status, data = profiles:load(userId)
+		local status, data, sessionId = profiles:load(userId, function()
+			return inGame(player)
+		end)
 		if not inGame(player) then
 			-- Parti pendant le chargement : libérer le verrou sans rien écrire.
 			if status == "Ready" then
-				releaseUntouched(userId)
+				releaseUntouched(userId, sessionId)
 			end
 			return
 		end
 		if status == "Ready" then
 			world:addPlayer(userId, now(), data)
 			if world:profileStatusOf(userId) ~= "Ready" then
-				releaseUntouched(userId)
+				releaseUntouched(userId, sessionId)
 			end
 			applyCosmetics(userId)
 		else

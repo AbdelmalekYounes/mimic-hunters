@@ -57,14 +57,20 @@ describe("CaptureLedger", function()
 		expect(ledger:isRewarded("A1")).toBe(true)
 	end)
 
-	it("oublie les vieilles tentatives mais garde la mémoire des récompenses", function()
+	it("oublie entièrement les vieilles tentatives (mémoire bornée, audit V0.3.1)", function()
 		local ledger = CaptureLedger.new()
 		ledger:open(attempt("A1", 1))
 		ledger:markRewarded("A1")
 		ledger:close("A1", 0)
+		-- Récente : la marque de récompense est gardée (rejeu immédiat refusé).
+		expect(ledger:prune(100, 120)).toBe(0)
+		expect(ledger:isRewarded("A1")).toBe(true)
+		-- Ancienne : tentative et marque oubliées. Sans tentative connue, aucune résolution n'est
+		-- possible (identifiants jamais réutilisés sur un serveur) ; l'idempotence durable est
+		-- assurée par les clés de capture du profil.
 		expect(ledger:prune(200, 120)).toBe(1)
 		expect(ledger:get("A1")).toBeNil()
-		expect(ledger:isRewarded("A1")).toBe(true)
+		expect(ledger:isRewarded("A1")).toBe(false)
 	end)
 end)
 

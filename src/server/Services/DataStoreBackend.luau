@@ -49,6 +49,18 @@ end
 	sinon bascule sur la mémoire. En jeu publié, une erreur au démarrage est passagère :
 	on garde le DataStore (les réessais de ProfileService s'en chargent).
 ]]
+-- Stockage qui échoue toujours (même interface) : profils « Unavailable », rien n'est écrit.
+function DataStoreBackend.unavailable(reason: string): any
+	return {
+		update = function(_self: any, _key: string, _transform: (any) -> any): (boolean, any)
+			return false, "DataStore indisponible : " .. reason
+		end,
+		budget = function(_self: any): number
+			return 1
+		end,
+	}
+end
+
 function DataStoreBackend.choose(saveConfig: any): (any, string)
 	local studio = RunService:IsStudio()
 	local name = if studio then saveConfig.StudioStoreName else saveConfig.StoreName
@@ -71,7 +83,11 @@ function DataStoreBackend.choose(saveConfig: any): (any, string)
 			warn("[Profils] DataStore inaccessible dans Studio : profils en mémoire.")
 			return MemoryBackend.new(), "mémoire (Studio)"
 		end
-		error("[Profils] DataStore inaccessible : " .. tostring(backendOrError))
+		-- Jeu publié : surtout PAS de repli mémoire (les captures seraient perdues sans que le
+		-- joueur le sache). Un stockage qui refuse tout : chaque profil passe « Unavailable »,
+		-- aucune acquisition n'est possible, et le serveur continue de tourner (audit P10).
+		warn("[Profils] DataStore inaccessible : " .. tostring(backendOrError) .. " — sauvegardes indisponibles.")
+		return DataStoreBackend.unavailable(tostring(backendOrError)), "indisponible"
 	end
 	return backendOrError, "DataStore " .. name
 end

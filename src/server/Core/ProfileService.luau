@@ -16,6 +16,15 @@
 	  Sinon la session est « Lost » : plus aucune écriture, le serveur est prévenu (onLost).
 	- Départ / fermeture : dernière sauvegarde qui libère le verrou.
 
+	Fiabilisation V0.3.1 (audit, docs/V031_AUDIT.md) :
+	- un seul chargement à la fois par joueur, annulable (P1) ; libération ciblée par sessionId ;
+	- libération idempotente : départ + fermeture ne libèrent qu'une fois (P2) ;
+	- fermeture bornée par une échéance globale (P3) ;
+	- enregistrement illisible jamais traité comme vide : « Corrupt », sans écriture (P4) ;
+	- sauvegardes en échec répétées signalées (onHealth) pour suspendre les acquisitions (P6) ;
+	- identifiant d'écriture : une écriture appliquée mais signalée en erreur n'est pas
+	  confondue avec un verrou perdu (P7).
+
 	Les erreurs du stockage sont réessayées avec un délai croissant ; le budget de requêtes est
 	respecté. Aucune dépendance Roblox : le stockage (backend), l'horloge, l'attente et le
 	lancement de tâches sont injectés, ce qui permet de tout tester dans Lune (pannes, verrous,
@@ -39,6 +48,7 @@ export type Config = {
 	LockedRetries: number,
 	LockedRetryDelay: number,
 	CloseTimeout: number,
+	DegradedAfter: number,
 }
 
 type Session = {
@@ -50,6 +60,9 @@ type Session = {
 	savedDirty: number,
 	important: boolean,
 	busy: boolean,
+	failures: number, -- sauvegardes périodiques consécutives en échec
+	degraded: boolean,
+	released: boolean?,
 }
 
 local ProfileService = {}
@@ -66,21 +79,37 @@ ProfileService.DefaultConfig = table.freeze({
 	RetryBase = 1,
 	LockedRetries = 4,
 	LockedRetryDelay = 5,
-	CloseTimeout = 25,
+	-- Roblox accorde ≈ 30 s à BindToClose : on garde une marge.
+	CloseTimeout = 24,
+	-- Après ce nombre de sauvegardes consécutives en échec (chacune déjà réessayée), la
+	-- persistance est jugée non sûre : acquisitions suspendues jusqu'au prochain succès.
+	DegradedAfter = 2,
 })
 
 -- ─── Transformations pures (appelées dans UpdateAsync) ──────────────────
 
 --[[
 	Pose le verrou de `sessionId`. Retourne (nouvel enregistrement | nil pour annuler, résultat).
-	Résultats : "Acquired" (libre ou à nous), "Stolen" (verrou périmé repris), "Locked".
+	Résultats : "Acquired" (libre ou à nous), "Stolen" (verrou périmé repris), "Locked",
+	"Corrupt" (enregistrement illisible : rien n'est écrit, rien n'est effacé).
 ]]
 function ProfileService.acquireTransform(record: any, jobId: string, sessionId: string, now: number, timeout: number)
-	if type(record) ~= "table" then
+	-- Un enregistrement existant mais illisible n'est JAMAIS remplacé par un profil vide.
+	if record ~= nil and type(record) ~= "table" then
+		return nil, "Corrupt"
+	end
+	if record == nil then
 		record = { data = nil, meta = {} }
 	end
 	if type(record.meta) ~= "table" then
 		record.meta = {}
+	end
+	if record.data ~= nil and type(record.data) ~= "table" then
+		return nil, "Corrupt"
+	end
+	-- Des données ont déjà été écrites pour ce joueur, mais elles ont disparu : illisible.
+	if record.data == nil and record.meta.hasData == true then
+		return nil, "Corrupt"
 	end
 	local lock = record.meta.lock
 	local outcome = "Acquired"
@@ -99,17 +128,32 @@ end
 
 --[[
 	Écrit `data` si le verrou appartient toujours à `sessionId`. `release` libère le verrou.
+	`commitId` identifie cette écriture : si elle a déjà été appliquée (réponse perdue puis
+	nouvel essai), le résultat est "Saved" sans rien réécrire.
 	Résultats : "Saved" ou "LockLost" (enregistrement non modifié).
 ]]
-function ProfileService.commitTransform(record: any, sessionId: string, data: any, now: number, release: boolean)
-	local lock = type(record) == "table" and type(record.meta) == "table" and record.meta.lock
+function ProfileService.commitTransform(
+	record: any,
+	sessionId: string,
+	data: any,
+	now: number,
+	release: boolean,
+	commitId: string?
+)
+	local meta = type(record) == "table" and type(record.meta) == "table" and record.meta
+	local lock = meta and meta.lock
 	if type(lock) ~= "table" or lock.sessionId ~= sessionId then
+		if meta and commitId and meta.commit == commitId then
+			return nil, "Saved"
+		end
 		return nil, "LockLost"
 	end
 	-- data nil : libération seule, les données déjà stockées sont conservées telles quelles.
 	if data ~= nil then
 		record.data = data
+		record.meta.hasData = true
 	end
+	record.meta.commit = commitId
 	record.meta.savedAt = now
 	record.meta.writes = (if type(record.meta.writes) == "number" then record.meta.writes else 0) + 1
 	if release then
@@ -149,9 +193,17 @@ function ProfileService.new(options: any)
 		end
 	end
 	self._config = config :: Config
+	self._onHealth = options.onHealth or function(_: number, _healthy: boolean) end
 	self._sessions = {} :: { [number]: Session }
+	self._loading = {} :: { [number]: boolean }
 	self._counter = 0
+	-- Fermeture du serveur : échéance absolue (horloge) au-delà de laquelle on n'attend plus.
+	self._deadline = nil :: number?
 	return self
+end
+
+function ProfileService._pastDeadline(self: any): boolean
+	return self._deadline ~= nil and self._clock() >= self._deadline
 end
 
 function ProfileService.key(self: any, userId: number): string
@@ -166,7 +218,7 @@ end
 -- Attend qu'il reste du budget d'écriture (au plus ~10 s, puis on laisse Roblox mettre en file).
 function ProfileService._awaitBudget(self: any)
 	for _ = 1, 10 do
-		if self._backend:budget() >= 1 then
+		if self._backend:budget() >= 1 or self:_pastDeadline() then
 			return
 		end
 		self._wait(1)
@@ -197,8 +249,16 @@ function ProfileService._update(
 			return true, box.outcome, result
 		end
 		self._log(string.format("[Profils] %s : échec %d/%d (%s)", key, attempt, config.MaxRetries, tostring(result)))
+		if self:_pastDeadline() then
+			break -- fermeture : plus le temps de réessayer
+		end
 		if attempt < config.MaxRetries then
-			self._wait(delay)
+			-- À la fermeture, l'attente ne dépasse jamais l'échéance.
+			local pause = if self._deadline then math.min(delay, self._deadline - self._clock()) else delay
+			if pause <= 0 then
+				break
+			end
+			self._wait(pause)
 			delay *= 2
 		end
 	end
@@ -207,20 +267,50 @@ end
 
 --[[
 	Charge le profil brut d'un joueur et pose le verrou. Cède la main.
-	Retours : ("Ready", données brutes ou nil pour un nouveau joueur) | ("Locked", nil) | ("Unavailable", nil).
+	`wanted` (facultatif) est consulté entre deux attentes : s'il renvoie false (joueur parti),
+	le chargement s'arrête sans poser de verrou ("Cancelled").
+	Retours : ("Ready", données brutes ou nil pour un nouveau joueur, sessionId)
+	| ("Locked" | "Unavailable" | "Corrupt" | "Cancelled", nil).
 	Les données brutes sont ensuite migrées par ProfileSchema (dans HuntWorld).
 ]]
-function ProfileService.load(self: any, userId: number): (string, any)
+function ProfileService.load(self: any, userId: number, wanted: (() -> boolean)?): (string, any, string?)
+	-- Un seul chargement à la fois par joueur : sinon un ancien chargement (nouvelles
+	-- tentatives d'un profil verrouillé) pourrait remplacer la session d'un nouveau (audit P1).
+	local waited = 0
+	while self._loading[userId] do
+		if wanted and not wanted() then
+			return "Cancelled", nil, nil
+		end
+		if waited >= 60 then
+			return "Unavailable", nil, nil
+		end
+		self._wait(0.5)
+		waited += 0.5
+	end
+	self._loading[userId] = true
+	local ok, status, data, sessionId = pcall(self._load, self, userId, wanted)
+	self._loading[userId] = nil
+	if not ok then
+		self._log(string.format("[Profils] %s : erreur de chargement (%s)", self:key(userId), tostring(status)))
+		return "Unavailable", nil, nil
+	end
+	return status, data, sessionId
+end
+
+function ProfileService._load(self: any, userId: number, wanted: (() -> boolean)?): (string, any, string?)
 	-- Une session précédente de ce joueur (départ en cours) doit d'abord se terminer.
 	for _ = 1, 30 do
 		local previous = self._sessions[userId]
 		if previous == nil or previous.status == "Lost" then
 			break
 		end
+		if wanted and not wanted() then
+			return "Cancelled", nil, nil
+		end
 		self._wait(0.5)
 	end
 	if self._sessions[userId] and self._sessions[userId].status ~= "Lost" then
-		return "Unavailable", nil
+		return "Unavailable", nil, nil
 	end
 
 	self._counter += 1
@@ -228,12 +318,19 @@ function ProfileService.load(self: any, userId: number): (string, any)
 	local key = self:key(userId)
 	local config = self._config
 	for attempt = 1, config.LockedRetries + 1 do
+		if wanted and not wanted() then
+			return "Cancelled", nil, nil
+		end
 		local now = self._clock()
 		local ok, outcome, record = self:_update(key, function(current)
 			return ProfileService.acquireTransform(current, self._jobId, sessionId, now, config.LockTimeout)
 		end)
 		if not ok then
-			return "Unavailable", nil
+			return "Unavailable", nil, nil
+		end
+		if outcome == "Corrupt" then
+			self._log(string.format("[Profils] %s : enregistrement illisible, rien n'est écrit", key))
+			return "Corrupt", nil, nil
 		end
 		if outcome == "Acquired" or outcome == "Stolen" then
 			if outcome == "Stolen" then
@@ -248,16 +345,24 @@ function ProfileService.load(self: any, userId: number): (string, any)
 				savedDirty = 0,
 				important = false,
 				busy = false,
+				failures = 0,
+				degraded = false,
 			}
 			local data = if type(record) == "table" then record.data else nil
-			return "Ready", ProfileSchema.deepCopy(data)
+			return "Ready", ProfileSchema.deepCopy(data), sessionId
 		end
 		-- Verrou d'une autre session encore active : on patiente un peu.
 		if attempt <= config.LockedRetries then
 			self._wait(config.LockedRetryDelay)
 		end
 	end
-	return "Locked", nil
+	return "Locked", nil, nil
+end
+
+-- Identifiant de la session active d'un joueur (pour une libération ciblée), ou nil.
+function ProfileService.sessionOf(self: any, userId: number): string?
+	local session = self._sessions[userId]
+	return if session then session.sessionId else nil
 end
 
 -- Signale une modification ; `important` = à sauvegarder dès que possible (capture, objectif).
@@ -285,7 +390,7 @@ function ProfileService.save(self: any, userId: number, data: any, release: bool
 	end
 	-- Une seule écriture à la fois par joueur.
 	while session.busy do
-		if not release then
+		if not release or self:_pastDeadline() then
 			return false
 		end
 		self._wait(0.25)
@@ -296,9 +401,10 @@ function ProfileService.save(self: any, userId: number, data: any, release: bool
 	local config = self._config
 	if release then
 		session.status = "Releasing"
-		-- Respecte l'intervalle minimal d'écriture sur la clé.
+		-- Respecte l'intervalle minimal d'écriture sur la clé, sauf à la fermeture du serveur :
+		-- Roblox met alors les écritures en file, et le temps est compté.
 		local remaining = config.MinSaveInterval - (self._clock() - session.lastSave)
-		if remaining > 0 then
+		if remaining > 0 and self._deadline == nil then
 			self._wait(remaining)
 		end
 	end
@@ -310,8 +416,10 @@ function ProfileService.save(self: any, userId: number, data: any, release: bool
 	if copy then
 		copy.updatedAt = now
 	end
+	self._counter += 1
+	local commitId = string.format("%s#%d", session.sessionId, self._counter)
 	local ok, outcome = self:_update(self:key(userId), function(current)
-		return ProfileService.commitTransform(current, session.sessionId, copy, now, release == true)
+		return ProfileService.commitTransform(current, session.sessionId, copy, now, release == true, commitId)
 	end)
 	session.busy = false
 
@@ -321,7 +429,23 @@ function ProfileService.save(self: any, userId: number, data: any, release: bool
 		if session.dirty == generation then
 			session.important = false
 		end
+		session.failures = 0
+		if session.degraded then
+			session.degraded = false
+			self._log(string.format("[Profils] %s : sauvegarde rétablie", self:key(userId)))
+			self._onHealth(userId, true)
+		end
 		return true
+	end
+	if not ok and not release then
+		-- Stockage en panne malgré les réessais : au-delà de DegradedAfter échecs consécutifs,
+		-- la persistance n'est plus sûre (audit P6).
+		session.failures += 1
+		if session.failures >= config.DegradedAfter and not session.degraded and session.status == "Active" then
+			session.degraded = true
+			self._log(string.format("[Profils] %s : sauvegardes en échec, acquisitions suspendues", self:key(userId)))
+			self._onHealth(userId, false)
+		end
 	end
 	if ok and outcome == "LockLost" then
 		session.status = "Lost"
@@ -355,14 +479,29 @@ function ProfileService.step(self: any, getData: (number) -> any)
 	end
 end
 
--- Dernière sauvegarde et libération du verrou. Cède la main.
-function ProfileService.release(self: any, userId: number, data: any): boolean
+--[[
+	Dernière sauvegarde et libération du verrou. Cède la main.
+	`sessionId` (facultatif) : ne libère que cette session (un autre chargement a pu en ouvrir
+	une plus récente). Idempotent : si une libération est déjà en cours (départ puis fermeture
+	du serveur), on l'attend au lieu d'écrire une seconde fois (audit P2).
+]]
+function ProfileService.release(self: any, userId: number, data: any, sessionId: string?): boolean
 	local session = self._sessions[userId]
-	if session == nil then
+	if session == nil or (sessionId ~= nil and session.sessionId ~= sessionId) then
 		return false
+	end
+	if session.status == "Releasing" then
+		local waited = 0
+		while self._sessions[userId] == session and not self:_pastDeadline() and waited < 120 do
+			self._wait(0.25)
+			waited += 0.25
+		end
+		return session.released == true
 	end
 	local ok = false
 	if session.status ~= "Lost" then
+		-- Marqué tout de suite (avant toute attente) pour qu'un second appel attende celui-ci.
+		session.status = "Releasing"
 		ok = self:save(userId, data, true)
 		if not ok then
 			-- Après tous les réessais : le verrou expirera seul (LockTimeout). Les modifications
@@ -370,14 +509,21 @@ function ProfileService.release(self: any, userId: number, data: any): boolean
 			self._log(string.format("[Profils] %s : sauvegarde finale impossible", self:key(userId)))
 		end
 	end
+	session.released = ok
 	if self._sessions[userId] == session then
 		self._sessions[userId] = nil
 	end
 	return ok
 end
 
--- Fermeture du serveur : libère toutes les sessions en parallèle, attend au plus CloseTimeout.
+--[[
+	Fermeture du serveur : libère toutes les sessions en parallèle avant une échéance globale
+	(CloseTimeout, sous les ≈ 30 s de BindToClose). Les sessions déjà en cours de libération
+	sont attendues, pas libérées une seconde fois. Celles qui n'ont pas pu être libérées à
+	temps sont journalisées.
+]]
 function ProfileService.closeAll(self: any, getData: (number) -> any)
+	self._deadline = self._clock() + self._config.CloseTimeout
 	local pending = 0
 	for userId in self._sessions do
 		pending += 1
@@ -387,10 +533,11 @@ function ProfileService.closeAll(self: any, getData: (number) -> any)
 			pending -= 1
 		end)
 	end
-	local waited = 0
-	while pending > 0 and waited < self._config.CloseTimeout do
+	while pending > 0 and not self:_pastDeadline() do
 		self._wait(0.5)
-		waited += 0.5
+	end
+	for userId in self._sessions do
+		self._log(string.format("[Profils] %s : non libéré avant la fin du délai de fermeture", self:key(userId)))
 	end
 end
 

@@ -110,6 +110,10 @@ function CaptureLedger.prune(self: Ledger, now: number, keepSeconds: number): nu
 		if now - closedAt > keepSeconds then
 			self._attempts[id] = nil
 			self._closedAt[id] = nil
+			-- La récompense d'une tentative close depuis longtemps ne peut plus être réclamée
+			-- (tentative inconnue) : la marque peut partir aussi, sinon la table grossit sans fin
+			-- sur un serveur de longue durée. La vraie idempotence est dans le profil (grants).
+			self._rewarded[id] = nil
 			removed += 1
 		end
 	end

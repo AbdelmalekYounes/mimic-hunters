@@ -62,6 +62,7 @@ local REASONS: { [string]: string } = {
 	AlreadyCapturing = "Termine d'abord ta capture en cours.",
 	UnknownMimic = "Ce Mimic n'est plus là.",
 	ProfileUnavailable = "Ton profil n'est pas encore sauvegardable : capture impossible pour l'instant.",
+	SaveUnavailable = "Sauvegarde en panne : capture en pause, réessaie dans un instant.",
 	CollectionFull = "Collection pleine (2000 Mimics) : impossible d'en capturer davantage pour l'instant.",
 }
 

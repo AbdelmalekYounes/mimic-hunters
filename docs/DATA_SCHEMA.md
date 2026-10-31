@@ -1,4 +1,4 @@
-# MIMIC HUNTERS — Données persistantes (V0.2, V0.3)
+# MIMIC HUNTERS — Données persistantes (V0.2, V0.3, V0.3.1)
 
 ## 1. Audit de la V0.1 (point de départ)
 
@@ -16,7 +16,9 @@ Une clé DataStore par joueur (`player_<userId>`), contenant :
 ```text
 record = {
   data = Profile,                       -- le profil ci-dessous
-  meta = { lock = { jobId, sessionId, at }?, savedAt, writes }
+  meta = { lock = { jobId, sessionId, at }?, savedAt, writes,
+           hasData,     -- V0.3.1 : des données ont déjà été écrites (leur disparition = illisible)
+           commit }     -- V0.3.1 : identifiant de la dernière écriture (réponse perdue ≠ verrou perdu)
 }
 
 Profile = {
@@ -78,7 +80,22 @@ la capture est refusée avec un message (aucune perte silencieuse).
 | Tests | `MemoryBackend` : pannes injectées, budget réglable, plusieurs « serveurs » sur le même stockage |
 
 États du profil vus par le joueur : `Loading`, `Ready`, `Unavailable`, `Locked`, `Lost`,
-`FutureVersion`, `Corrupt` (message affiché pour chacun).
+`FutureVersion`, `Corrupt`, `Degraded` (V0.3.1) — message affiché pour chacun.
+
+### Fiabilisation V0.3.1 (audit, [V031_AUDIT.md](V031_AUDIT.md))
+
+| Règle | Mise en œuvre | Test |
+|---|---|---|
+| Un seul chargement à la fois par joueur, annulé si le joueur part | `ProfileService.load(userId, wanted)` | `profile_concurrency › P1` |
+| Libération ciblée : un ancien chargement ne libère jamais la session d'un nouveau | `release(userId, data, sessionId)` | `P1 › libération ciblée` |
+| Départ puis fermeture : une seule libération, avec les données | session `Releasing` attendue, pas relancée | `P2` |
+| Fermeture bornée à 24 s (BindToClose ≈ 30 s), réessais compris | échéance globale ; attentes plafonnées ; sessions non libérées journalisées | `P3` (DataStore lent et en panne) |
+| Enregistrement illisible (non-table, `data` non-table, `data` disparue alors que `hasData`) | `Corrupt` : rien n'est écrit, rien n'est effacé, captures désactivées | `P4` |
+| Exemplaire illisible au chargement | mis en **quarantaine** dans le profil (`quarantine`, 50 au plus), compté et journalisé, jamais effacé | `P5` |
+| Champ inconnu (version plus récente, même schéma) | conservé tel quel | `P5` |
+| 2 sauvegardes périodiques consécutives en échec (chacune déjà réessayée 5 fois) | statut `Degraded` : profil gardé en mémoire, **captures et modifications du musée suspendues**, message ; retour à `Ready` au premier succès | `P6`, `persistence › panne prolongée` |
+| Écriture appliquée mais réponse perdue | identifiant `commit` reconnu au nouvel essai : « Saved », pas « verrou perdu » | `P7` |
+| DataStore inaccessible au démarrage d'un serveur publié | stockage « indisponible » : profils `Unavailable`, aucune acquisition, le serveur continue (jamais de repli mémoire en jeu publié) | revue de code (API Roblox) |
 
 ## 4. Réseau
 
@@ -127,4 +144,5 @@ Réseau (V0.3) :
 | `MuseumInfo`, `MuseumResult`, `HuntUpdate` | serveur → client | parcelle, résultats, déroulement du défi |
 
 Limite inchangée : le vrai DataStore n'a été validé dans aucune expérience publiée ; toute la
-persistance a été testée avec le stockage simulé (Lune) et le stockage mémoire de Studio.
+persistance a été testée avec le stockage simulé (Lune) et le stockage mémoire de Studio. Un
+contrôle automatique sur un vrai DataStore est prêt : [PRIVATE_TEST_PUBLISH.md](PRIVATE_TEST_PUBLISH.md).

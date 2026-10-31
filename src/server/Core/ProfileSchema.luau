@@ -72,6 +72,8 @@ export type Profile = {
 	tutorialDone: boolean,
 	museum: Museum,
 	hunts: Hunts,
+	-- Éléments illisibles écartés par `sanitize`, gardés pour une restauration manuelle (V0.3.1).
+	quarantine: { any }?,
 }
 
 export type Museum = {
@@ -111,6 +113,8 @@ ProfileSchema.DefaultScannerColor = "Cyan"
 ProfileSchema.MaxSpecimens = 2000
 -- Nombre de clés de capture mémorisées pour l'idempotence.
 ProfileSchema.MaxGrants = 100
+-- Éléments écartés gardés en quarantaine (les plus récents), au lieu d'être effacés.
+ProfileSchema.MaxQuarantine = 50
 
 function ProfileSchema.new(now: number): Profile
 	return {
@@ -248,6 +252,12 @@ end
 function ProfileSchema.sanitize(data: any, context: Context): (Profile, number)
 	local profile = ProfileSchema.new(context.now)
 	local dropped = 0
+	local quarantined = {}
+	if type(data.quarantine) == "table" then
+		for _, entry in data.quarantine do
+			table.insert(quarantined, entry)
+		end
+	end
 	profile.createdAt = if isNumber(data.createdAt) then data.createdAt else context.now
 	profile.updatedAt = if isNumber(data.updatedAt) then data.updatedAt else context.now
 	profile.tutorialDone = data.tutorialDone == true
@@ -278,7 +288,15 @@ function ProfileSchema.sanitize(data: any, context: Context): (Profile, number)
 					maxSerial = serial
 				end
 			else
+				-- Exemplaire illisible : jamais effacé en silence. Il est mis en quarantaine dans
+				-- le profil (restauration manuelle possible) et compté pour le journal du serveur.
 				dropped += 1
+				table.insert(quarantined, {
+					reason = "InvalidSpecimen",
+					key = string.sub(tostring(key), 1, 64),
+					item = if type(s) == "table" then ProfileSchema.deepCopy(s) else string.sub(tostring(s), 1, 200),
+					at = context.now,
+				})
 			end
 		end
 	end
@@ -398,6 +416,20 @@ function ProfileSchema.sanitize(data: any, context: Context): (Profile, number)
 			end
 		end
 	end
+
+	-- Quarantaine bornée : on garde les entrées les plus récentes.
+	while #quarantined > ProfileSchema.MaxQuarantine do
+		table.remove(quarantined, 1)
+	end
+	profile.quarantine = if #quarantined > 0 then quarantined else nil
+
+	-- Champs inconnus de ce serveur (ajoutés par une version plus récente sans changement de
+	-- schemaVersion) : conservés tels quels plutôt qu'effacés à la sauvegarde suivante.
+	for key, value in data do
+		if type(key) == "string" and (profile :: any)[key] == nil and key ~= "quarantine" and key ~= "version" then
+			(profile :: any)[key] = ProfileSchema.deepCopy(value)
+		end
+	end
 	return profile, dropped
 end
 
@@ -406,7 +438,7 @@ end
 	Retours : (profil, nil) ou (nil, "FutureVersion" | "Corrupt").
 	nil en entrée = nouveau joueur : un profil neuf est créé.
 ]]
-function ProfileSchema.migrate(data: any, context: Context): (Profile?, string?)
+function ProfileSchema.migrate(data: any, context: Context): (Profile?, string?, number?)
 	if data == nil then
 		return ProfileSchema.new(context.now), nil
 	end
@@ -427,10 +459,13 @@ function ProfileSchema.migrate(data: any, context: Context): (Profile?, string?)
 			return nil, "Corrupt"
 		end
 		current = step(current, context)
-		version += 1
+		-- Une étape peut produire directement une version plus récente (v1 → profil neuf) :
+		-- on reprend à la version qu'elle annonce, jamais en arrière.
+		local reached = if type(current) == "table" then current.schemaVersion else nil
+		version = if isNumber(reached) and reached > version then reached else version + 1
 	end
-	local profile = ProfileSchema.sanitize(current, context)
-	return profile, nil
+	local profile, dropped = ProfileSchema.sanitize(current, context)
+	return profile, nil, dropped
 end
 
 function ProfileSchema.deepCopy(value: any): any
